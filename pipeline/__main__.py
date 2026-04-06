@@ -231,16 +231,26 @@ def cmd_run(args):
 
 
 def cmd_topics(args):
-    from .topics import TopicEngine
+    region = getattr(args, "region", None)
+    limit = getattr(args, "limit", 15)
 
-    engine = TopicEngine()
-    candidates = engine.discover(limit=getattr(args, "limit", 15))
+    if region:
+        # Direct Google Trends RSS for specific country
+        from .topics.google_trends import GoogleTrendsSource
+        source = GoogleTrendsSource({"geo": region})
+        candidates = source.fetch_topics(limit=limit, geo=region)
+    else:
+        # Full multi-source discovery
+        from .topics import TopicEngine
+        engine = TopicEngine()
+        candidates = engine.discover(limit=limit)
 
     if not candidates:
-        print("  No topics found from enabled sources.")
+        print("  No topics found.")
         return
 
-    print(f"\n  Trending topics ({len(candidates)} found):\n")
+    region_label = f" ({region})" if region else ""
+    print(f"\n  Trending topics{region_label} ({len(candidates)} found):\n")
     for i, topic in enumerate(candidates, 1):
         score = f" [{topic.trending_score:.2f}]" if topic.trending_score else ""
         print(f"  {i:2d}. [{topic.source}] {topic.title}{score}")
@@ -300,6 +310,7 @@ def main():
     # topics
     p_topics = sub.add_parser("topics", help="Discover trending topics")
     p_topics.add_argument("--limit", type=int, default=15, help="Max topics to show")
+    p_topics.add_argument("--region", default=None, help="Country code: TR, DE, GB, US, ES, IT")
 
     args = parser.parse_args()
 

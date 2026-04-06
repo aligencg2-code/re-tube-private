@@ -2041,25 +2041,53 @@ elif page == "Trends":
     </div>
     """, unsafe_allow_html=True)
 
-    trend_type = st.radio(
-        "trend_type",
-        [t("trends_desc_tr"), t("trends_desc_world")],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    # Country selection
+    countries = {
+        "TR": "Türkiye",
+        "DE": "Almanya / Deutschland",
+        "GB": "İngiltere / United Kingdom",
+        "US": "Amerika / United States",
+        "ES": "İspanya / España",
+        "IT": "İtalya / Italia",
+    }
 
-    limit = st.slider(t("results_limit"), 5, 30, 15)
+    tcol1, tcol2 = st.columns([2, 1])
+    with tcol1:
+        selected_country = st.selectbox(
+            "Ülke / Country",
+            list(countries.keys()),
+            format_func=lambda x: f"{'🇹🇷' if x=='TR' else '🇩🇪' if x=='DE' else '🇬🇧' if x=='GB' else '🇺🇸' if x=='US' else '🇪🇸' if x=='ES' else '🇮🇹'} {countries[x]}",
+            key="trend_country",
+        )
+    with tcol2:
+        limit = st.slider(t("results_limit"), 5, 30, 15, key="trend_limit")
 
     if st.button(t("discover"), use_container_width=True):
         with st.spinner(t("searching")):
-            cmd = ["topics", "--limit", str(limit)]
-            if trend_type == t("trends_desc_tr"):
-                cmd += ["--region", "TR"]
+            cmd = ["topics", "--limit", str(limit), "--region", selected_country]
             stdout, stderr, code = run_pipeline_command(cmd)
             if code == 0 and stdout:
-                st.code(stdout, language="text")
+                # Parse and display nicely
+                lines = stdout.strip().split("\n")
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("Trending") or line.startswith("No"):
+                        st.markdown(f"**{line}**")
+                    elif line[0:1].isdigit():
+                        # Extract topic info
+                        st.markdown(f"""
+                        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle);
+                                    border-radius: 10px; padding: 0.8rem 1rem; margin-bottom: 0.5rem;
+                                    transition: border-color 0.2s ease;">
+                            <span style="color: var(--text-bright); font-weight: 500;">{line}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    elif line.startswith("  "):
+                        st.caption(line.strip())
             elif stderr:
-                st.warning(stderr[:200])
+                st.warning(stderr[:300])
 
 
 # =====================================================================
