@@ -7,8 +7,16 @@ echo  RE-Tube - Ilk Kurulum
 echo  =====================
 echo.
 
-where python >nul 2>&1
-if %errorlevel% neq 0 (
+:: Find Python
+set PYTHON=
+where python >nul 2>&1 && set PYTHON=python
+if not defined PYTHON (
+    where py >nul 2>&1 && set PYTHON=py
+)
+if not defined PYTHON (
+    where python3 >nul 2>&1 && set PYTHON=python3
+)
+if not defined PYTHON (
     echo  [HATA] Python bulunamadi!
     echo.
     echo  1. https://www.python.org/downloads/ adresinden Python 3.10+ indirin
@@ -20,7 +28,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-for /f "tokens=*" %%i in ('python --version 2^>^&1') do echo  [OK] %%i bulundu.
+echo  [OK] Python bulundu: %PYTHON%
 
 where ffmpeg >nul 2>&1
 if %errorlevel% neq 0 (
@@ -29,26 +37,28 @@ if %errorlevel% neq 0 (
     echo  [OK] FFmpeg bulundu.
 )
 
+where git >nul 2>&1
+if %errorlevel% neq 0 (
+    echo  [UYARI] Git bulunamadi - otomatik guncelleme icin gerekli.
+) else (
+    echo  [OK] Git bulundu.
+)
+
 echo.
 echo  Paketler yukleniyor...
 echo.
 
-pip install -r requirements.txt
-pip install streamlit edge-tts
+%PYTHON% -m pip install --upgrade pip
+%PYTHON% -m pip install -r requirements.txt
+%PYTHON% -m pip install streamlit edge-tts
 
 echo.
 echo  =====================
 echo  Kurulum tamamlandi!
 echo  =====================
 echo.
-echo  Simdi yapmaniz gerekenler:
+echo  Simdi RE-Tube.bat dosyasina cift tiklayarak programi baslatin.
 echo.
-echo  1. RE-Tube.bat dosyasina cift tiklayarak programi baslatin
-echo  2. Tarayicida Ayarlar sayfasindan API anahtarlarinizi girin
-echo  3. YouTube yuklemesi icin asagidaki komutu calistirin:
-echo     python scripts\setup_youtube_oauth.py
-echo.
-echo  Detayli bilgi: KURULUM_REHBERI.md dosyasini okuyun
 echo  Destek: t.me/reworar
 echo.
 pause
