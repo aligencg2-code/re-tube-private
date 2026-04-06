@@ -2,7 +2,7 @@
 
 import json
 
-from .config import get_anthropic_client, get_claude_backend, call_claude_cli, DURATIONS
+from .config import get_anthropic_client, get_anthropic_key, get_claude_backend, call_claude_cli, has_claude_cli, DURATIONS
 from .log import log
 from .research import research_topic
 from .retry import with_retry
@@ -10,25 +10,38 @@ from .retry import with_retry
 
 @with_retry(max_retries=2, base_delay=3.0)
 def _call_claude(prompt: str) -> str:
-    """Call Claude via API key or CLI (Claude Max).
+    """Call Claude via API key or CLI — auto-detects best available method.
 
-    Uses ANTHROPIC_API_KEY if set, otherwise falls back to `claude` CLI
-    which uses Claude Max subscription auth.
+    Priority: API key > CLI (Claude Max) > error
     """
-    backend = get_claude_backend()
+    # Try API first (works if ANTHROPIC_API_KEY is set)
+    api_key = get_anthropic_key()
+    if api_key:
+        try:
+            log("Using Claude API for script generation...")
+            client = get_anthropic_client()
+            msg = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=3000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return msg.content[0].text.strip()
+        except Exception as e:
+            log(f"Claude API failed: {e}")
 
-    if backend == "api":
-        client = get_anthropic_client()
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return msg.content[0].text.strip()
-    else:
-        # Claude Max via CLI
-        log("Using Claude Max (CLI) for script generation...")
-        return call_claude_cli(prompt)
+    # Try CLI (works if claude CLI installed + Claude Max subscription)
+    if has_claude_cli():
+        try:
+            log("Using Claude Max (CLI) for script generation...")
+            return call_claude_cli(prompt)
+        except Exception as e:
+            log(f"Claude CLI failed: {e}")
+
+    raise RuntimeError(
+        "Claude erişimi bulunamadı. Şu seçeneklerden birini yapın:\n"
+        "  1. Ayarlar'dan ANTHROPIC_API_KEY girin\n"
+        "  2. Claude Code CLI kurup 'claude login' yapın"
+    )
 
 
 def generate_draft(news: str, channel_context: str = "", lang: str = "en",
