@@ -252,8 +252,7 @@ def cmd_topics(args):
     region_label = f" ({region})" if region else ""
     print(f"\n  Trending topics{region_label} ({len(candidates)} found):\n")
     for i, topic in enumerate(candidates, 1):
-        score = f" [{topic.trending_score:.2f}]" if topic.trending_score else ""
-        print(f"  {i:2d}. [{topic.source}] {topic.title}{score}")
+        print(f"  {i:2d}. {topic.title}")
         if topic.summary:
             print(f"      {topic.summary[:100]}")
 
