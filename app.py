@@ -1563,6 +1563,32 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
+    # Update check button
+    st.markdown("")  # spacer
+    from updater import load_version_info, check_for_updates, apply_update, init_repo, has_git as has_git_cmd
+
+    ver_info = load_version_info()
+    repo_url = ver_info.get("repo_url", "")
+    ver_label = f"v{ver_info.get('current_version', '1.0.0')}"
+
+    if repo_url and has_git_cmd():
+        if st.button(f"🔄  {t('check_updates')}", use_container_width=True, key="sidebar_update_check"):
+            with st.spinner("..."):
+                init_repo(repo_url, ver_info.get("branch", "main"))
+                has_upd, local_h, remote_h = check_for_updates(repo_url, ver_info.get("branch", "main"))
+                if has_upd:
+                    st.warning(f"{t('update_available')}")
+                    if st.button(t("apply_update"), use_container_width=True, key="sidebar_apply_update"):
+                        ok, msg = apply_update(ver_info.get("branch", "main"))
+                        if ok:
+                            st.success(t("update_success"))
+                        else:
+                            st.error(msg[:100])
+                else:
+                    st.success(f"✓ {t('up_to_date')}")
+
+    st.caption(f"RE-Tube {ver_label}")
+
     # Contact footer
     st.markdown("""
     <div class="sidebar-footer">
