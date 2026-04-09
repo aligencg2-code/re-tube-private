@@ -1451,15 +1451,17 @@ def get_channels() -> list[dict]:
     # Default channel (legacy token)
     default_token = SKILL_DIR / "youtube_token.json"
     if default_token.exists():
-        channels.append({"name": "Varsayılan Kanal", "token_path": str(default_token), "id": "default"})
+        channels.append({"name": "Varsayılan Kanal", "token_path": str(default_token), "id": "default", "connected": True})
     # Named channels
     if CHANNELS_DIR.exists():
         for d in sorted(CHANNELS_DIR.iterdir()):
-            if d.is_dir() and (d / "youtube_token.json").exists():
+            if d.is_dir():
+                token_exists = (d / "youtube_token.json").exists()
                 channels.append({
                     "name": d.name,
                     "token_path": str(d / "youtube_token.json"),
                     "id": d.name,
+                    "connected": token_exists,
                 })
     return channels
 
@@ -2389,7 +2391,16 @@ elif page == "Settings":
         for ch in channels:
             ch_col1, ch_col2 = st.columns([3, 1])
             with ch_col1:
-                st.markdown(f"**{ch['name']}** — `{ch['id']}`")
+                status_icon = "●" if ch.get("connected") else "○"
+                status_color = "var(--status-success)" if ch.get("connected") else "var(--status-error)"
+                status_text = "Bağlı" if ch.get("connected") else "OAuth gerekli"
+                st.markdown(
+                    f'<span style="color:{status_color}">{status_icon}</span> '
+                    f'**{ch["name"]}** — <span style="color:var(--text-dim)">{status_text}</span>',
+                    unsafe_allow_html=True,
+                )
+                if not ch.get("connected"):
+                    st.caption(f'`python scripts/setup_youtube_oauth.py --channel "{ch["id"]}"`')
             with ch_col2:
                 if st.button(t("remove_channel"), key=f"rm_ch_{ch['id']}", use_container_width=True):
                     remove_channel(ch["id"])
