@@ -125,6 +125,17 @@ TEXTS = {
         "repo_url": "GitHub Repo URL",
         "no_repo": "Repo URL ayarlanmamış.",
         "version_label": "Sürüm",
+        "channels": "YouTube Kanalları",
+        "add_channel": "Kanal Ekle",
+        "channel_name": "Kanal Adı",
+        "channel_name_ph": "örn. Ana Kanal, İkinci Kanal",
+        "setup_channel": "OAuth Bağla",
+        "remove_channel": "Kaldır",
+        "select_channel": "Yükleme Kanalı",
+        "no_channels": "Henüz kanal eklenmemiş.",
+        "channel_added": "Kanal eklendi!",
+        "channel_removed": "Kanal kaldırıldı.",
+        "channel_auth_info": "Terminalde çalıştırın:",
         "component": "Bileşen",
         "status_col": "Durum",
         "connected": "Bağlı",
@@ -254,6 +265,17 @@ TEXTS = {
         "repo_url": "GitHub Repo URL",
         "no_repo": "Repo URL not configured.",
         "version_label": "Version",
+        "channels": "YouTube Channels",
+        "add_channel": "Add Channel",
+        "channel_name": "Channel Name",
+        "channel_name_ph": "e.g. Main Channel, Second Channel",
+        "setup_channel": "Connect OAuth",
+        "remove_channel": "Remove",
+        "select_channel": "Upload Channel",
+        "no_channels": "No channels added yet.",
+        "channel_added": "Channel added!",
+        "channel_removed": "Channel removed.",
+        "channel_auth_info": "Run in terminal:",
         "component": "Component",
         "status_col": "Status",
         "connected": "Connected",
@@ -1224,7 +1246,7 @@ def run_pipeline_command(cmd):
         result = subprocess.run(
             [sys.executable, "-m", "pipeline"] + cmd,
             capture_output=True, text=True, encoding="utf-8",
-            cwd=str(PROJECT_DIR), timeout=600,
+            cwd=str(PROJECT_DIR), timeout=1800,
         )
         return result.stdout, result.stderr, result.returncode
     except subprocess.TimeoutExpired:
@@ -1321,7 +1343,7 @@ def run_pipeline_with_progress(cmd, progress_bar, status_text, lang_key="tr"):
                     )
                     status_text.code("\n".join(full_output[-8:]), language="text")
 
-        process.wait(timeout=600)
+        process.wait(timeout=1800)
     except subprocess.TimeoutExpired:
         process.kill()
         return "\n".join(full_output), "Timeout", 1
@@ -1420,6 +1442,49 @@ has_gemini = bool(config.get("GEMINI_API_KEY"))
 has_pexels = bool(config.get("PEXELS_API_KEY"))
 has_elevenlabs = bool(config.get("ELEVENLABS_API_KEY"))
 has_yt_token = (SKILL_DIR / "youtube_token.json").exists()
+CHANNELS_DIR = SKILL_DIR / "channels"
+
+
+def get_channels() -> list[dict]:
+    """Get list of configured YouTube channels."""
+    channels = []
+    # Default channel (legacy token)
+    default_token = SKILL_DIR / "youtube_token.json"
+    if default_token.exists():
+        channels.append({"name": "Varsayılan Kanal", "token_path": str(default_token), "id": "default"})
+    # Named channels
+    if CHANNELS_DIR.exists():
+        for d in sorted(CHANNELS_DIR.iterdir()):
+            if d.is_dir() and (d / "youtube_token.json").exists():
+                channels.append({
+                    "name": d.name,
+                    "token_path": str(d / "youtube_token.json"),
+                    "id": d.name,
+                })
+    return channels
+
+
+def add_channel(name: str):
+    """Create a new channel directory."""
+    safe_name = "".join(c for c in name if c.isalnum() or c in " -_").strip()
+    if not safe_name:
+        return
+    channel_dir = CHANNELS_DIR / safe_name
+    channel_dir.mkdir(parents=True, exist_ok=True)
+    return channel_dir
+
+
+def remove_channel(channel_id: str):
+    """Remove a channel directory."""
+    if channel_id == "default":
+        token = SKILL_DIR / "youtube_token.json"
+        if token.exists():
+            token.unlink()
+    else:
+        import shutil
+        channel_dir = CHANNELS_DIR / channel_id
+        if channel_dir.exists():
+            shutil.rmtree(channel_dir)
 try:
     subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5)
     has_ffmpeg = True
@@ -1854,6 +1919,20 @@ elif page == "Pipeline":
 
         force = st.checkbox(t("force_redo"))
 
+        # Channel selection
+        channels = get_channels()
+        if len(channels) > 1:
+            selected_channel = st.selectbox(
+                t("select_channel"),
+                channels,
+                format_func=lambda x: x["name"],
+                key="pipeline_channel",
+            )
+        elif channels:
+            selected_channel = channels[0]
+        else:
+            selected_channel = None
+
     # Pipeline stages visualization
     stages = ["Research", "Draft", "B-Roll", "Voice", "Captions", "Music", "Assemble", "Thumb", "Upload"]
     pills = "".join(f'<span class="stage-pill">{s}</span>' for s in stages)
@@ -1878,6 +1957,10 @@ elif page == "Pipeline":
 
             if channel_ctx:
                 cmd += ["--context", channel_ctx]
+
+            # Add channel token path for upload
+            if selected_channel and selected_channel.get("token_path"):
+                cmd += ["--token-path", selected_channel["token_path"]]
 
             # Progress bar
             st.markdown("---")
@@ -2297,12 +2380,43 @@ elif page == "Settings":
 
     st.divider()
 
-    # --- YouTube OAuth ---
-    st.markdown(f"### {t('yt_oauth')}")
-    if has_yt_token:
-        st.success(t("yt_configured"))
+    # --- YouTube Channels ---
+    st.markdown(f"### {t('channels')}")
+
+    channels = get_channels()
+
+    if channels:
+        for ch in channels:
+            ch_col1, ch_col2 = st.columns([3, 1])
+            with ch_col1:
+                st.markdown(f"**{ch['name']}** — `{ch['id']}`")
+            with ch_col2:
+                if st.button(t("remove_channel"), key=f"rm_ch_{ch['id']}", use_container_width=True):
+                    remove_channel(ch["id"])
+                    st.success(t("channel_removed"))
+                    st.rerun()
     else:
-        st.warning(t("yt_not_configured"))
+        st.info(t("no_channels"))
+
+    # Add new channel
+    st.markdown("---")
+    add_col1, add_col2 = st.columns([3, 1])
+    with add_col1:
+        new_channel_name = st.text_input(
+            t("channel_name"),
+            placeholder=t("channel_name_ph"),
+            key="new_channel_name",
+        )
+    with add_col2:
+        st.markdown("")  # spacer
+        st.markdown("")
+        if st.button(t("add_channel"), use_container_width=True, key="add_ch_btn"):
+            if new_channel_name.strip():
+                ch_dir = add_channel(new_channel_name.strip())
+                if ch_dir:
+                    st.success(t("channel_added"))
+                    st.info(f"{t('channel_auth_info')}\n```\npython scripts/setup_youtube_oauth.py --channel \"{new_channel_name.strip()}\"\n```")
+                    st.rerun()
 
     st.divider()
 

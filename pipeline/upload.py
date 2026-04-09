@@ -14,6 +14,7 @@ def upload_to_youtube(
     srt_path: Path = None,
     lang: str = "en",
     thumbnail_path: Path = None,
+    token_path_override: str = None,
 ) -> str:
     """Upload video to YouTube with metadata, captions, and optional thumbnail."""
     from google.oauth2.credentials import Credentials
@@ -21,7 +22,10 @@ def upload_to_youtube(
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
-    token_path = get_youtube_token_path()
+    if token_path_override and Path(token_path_override).exists():
+        token_path = Path(token_path_override)
+    else:
+        token_path = get_youtube_token_path()
     creds = Credentials.from_authorized_user_file(str(token_path))
     if creds.expired:
         if creds.refresh_token:

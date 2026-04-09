@@ -192,7 +192,8 @@ def cmd_upload(args):
 
     # Upload
     if force or not state.is_done("upload"):
-        url = upload_to_youtube(video_path, draft, srt_path, lang, thumb_path)
+        token_override = getattr(args, "token_path", None)
+        url = upload_to_youtube(video_path, draft, srt_path, lang, thumb_path, token_override)
         state.complete_stage("upload", {"url": url})
     else:
         url = state.get_artifact("upload", "url", "")
@@ -225,6 +226,7 @@ def cmd_run(args):
         draft = str(draft_path)
         lang = args.lang
         force = False
+        token_path = getattr(args, "token_path", None)
 
     url = cmd_upload(UploadArgs())
     print(f"\n  Done! {url}")
@@ -294,6 +296,7 @@ def main():
     p_upload.add_argument("--draft", required=True)
     p_upload.add_argument("--lang", default="en", choices=["en", "de", "hi", "tr"])
     p_upload.add_argument("--force", action="store_true", help="Re-upload even if done")
+    p_upload.add_argument("--token-path", default=None, help="Path to YouTube OAuth token")
 
     # run (full pipeline)
     p_run = sub.add_parser("run", help="Full pipeline: draft -> produce -> upload")
@@ -305,6 +308,7 @@ def main():
     p_run.add_argument("--auto-pick", action="store_true")
     p_run.add_argument("--format", choices=["shorts", "video"], default="shorts", help="Video format: shorts (9:16) or video (16:9)")
     p_run.add_argument("--duration", choices=["short", "3min", "5min", "10min"], default="short", help="Video duration preset")
+    p_run.add_argument("--token-path", default=None, help="Path to YouTube OAuth token for channel selection")
 
     # topics
     p_topics = sub.add_parser("topics", help="Discover trending topics")

@@ -52,6 +52,22 @@ def main():
         print("   pip install google-auth-oauthlib google-api-python-client")
         sys.exit(1)
 
+    # Parse --channel argument
+    import argparse
+    parser = argparse.ArgumentParser(description="YouTube OAuth Setup")
+    parser.add_argument("client_secret_path", nargs="?", default=None)
+    parser.add_argument("--channel", default=None, help="Channel name for multi-channel support")
+    args = parser.parse_args()
+
+    # Determine token save path
+    if args.channel:
+        channel_dir = SKILL_DIR / "channels" / args.channel
+        channel_dir.mkdir(parents=True, exist_ok=True)
+        token_save_path = channel_dir / "youtube_token.json"
+        print(f"\nChannel: {args.channel}")
+    else:
+        token_save_path = TOKEN_PATH
+
     SKILL_DIR.mkdir(parents=True, exist_ok=True)
 
     print("YouTube OAuth Setup")
@@ -59,8 +75,8 @@ def main():
 
     # Accept path as CLI argument, auto-detect, or ask interactively
     client_secrets = None
-    if len(sys.argv) > 1:
-        client_secrets = sys.argv[1]
+    if args.client_secret_path:
+        client_secrets = args.client_secret_path
     else:
         client_secrets = find_client_secret()
         if client_secrets:
@@ -91,10 +107,10 @@ def main():
     flow = InstalledAppFlow.from_client_secrets_file(client_secrets, SCOPES)
     creds = flow.run_local_server(port=0, open_browser=True)
 
-    fd = os.open(str(TOKEN_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(str(token_save_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(creds.to_json())
-    print(f"\n[OK] Token saved to {TOKEN_PATH}")
+    print(f"\n[OK] Token saved to {token_save_path}")
     print("\nYou're all set! You can now run the pipeline and upload videos.")
 
 
