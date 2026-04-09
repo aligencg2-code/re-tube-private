@@ -2400,23 +2400,24 @@ elif page == "Settings":
 
     # Add new channel
     st.markdown("---")
-    add_col1, add_col2 = st.columns([3, 1])
-    with add_col1:
-        new_channel_name = st.text_input(
-            t("channel_name"),
-            placeholder=t("channel_name_ph"),
-            key="new_channel_name",
-        )
-    with add_col2:
-        st.markdown("")  # spacer
-        st.markdown("")
-        if st.button(t("add_channel"), use_container_width=True, key="add_ch_btn"):
-            if new_channel_name.strip():
-                ch_dir = add_channel(new_channel_name.strip())
-                if ch_dir:
-                    st.success(t("channel_added"))
-                    st.info(f"{t('channel_auth_info')}\n```\npython scripts/setup_youtube_oauth.py --channel \"{new_channel_name.strip()}\"\n```")
-                    st.rerun()
+    with st.form("add_channel_form", clear_on_submit=True):
+        add_col1, add_col2 = st.columns([3, 1])
+        with add_col1:
+            new_channel_name = st.text_input(
+                t("channel_name"),
+                placeholder=t("channel_name_ph"),
+            )
+        with add_col2:
+            st.markdown("")
+            st.markdown("")
+            submitted = st.form_submit_button(t("add_channel"), use_container_width=True)
+
+        if submitted and new_channel_name.strip():
+            ch_dir = add_channel(new_channel_name.strip())
+            if ch_dir:
+                st.success(f"{t('channel_added')} — {new_channel_name.strip()}")
+                st.info(f"{t('channel_auth_info')}\n```\npython scripts/setup_youtube_oauth.py --channel \"{new_channel_name.strip()}\"\n```")
+                st.rerun()
 
     st.divider()
 
