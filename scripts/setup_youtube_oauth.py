@@ -52,19 +52,29 @@ def main():
         print("   pip install google-auth-oauthlib google-api-python-client")
         sys.exit(1)
 
-    # Parse --channel argument
-    import argparse
-    parser = argparse.ArgumentParser(description="YouTube OAuth Setup")
-    parser.add_argument("client_secret_path", nargs="?", default=None)
-    parser.add_argument("--channel", default=None, help="Channel name for multi-channel support")
-    args = parser.parse_args()
+    # Parse arguments - support both old style and new --channel style
+    channel_name = None
+    client_secret_arg = None
+
+    # Check for --channel flag
+    remaining_args = []
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--channel" and i + 1 < len(sys.argv):
+            channel_name = sys.argv[i + 1]
+            i += 2
+        else:
+            remaining_args.append(sys.argv[i])
+            i += 1
+
+    if remaining_args:
+        client_secret_arg = remaining_args[0]
 
     # Determine token save path
-    if args.channel:
-        channel_dir = SKILL_DIR / "channels" / args.channel
+    if channel_name:
+        channel_dir = SKILL_DIR / "channels" / channel_name
         channel_dir.mkdir(parents=True, exist_ok=True)
         token_save_path = channel_dir / "youtube_token.json"
-        print(f"\nChannel: {args.channel}")
     else:
         token_save_path = TOKEN_PATH
 
@@ -72,11 +82,13 @@ def main():
 
     print("YouTube OAuth Setup")
     print("=" * 50)
+    if channel_name:
+        print(f"Channel: {channel_name}")
 
-    # Accept path as CLI argument, auto-detect, or ask interactively
+    # Find client_secret.json
     client_secrets = None
-    if args.client_secret_path:
-        client_secrets = args.client_secret_path
+    if client_secret_arg:
+        client_secrets = client_secret_arg
     else:
         client_secrets = find_client_secret()
         if client_secrets:
