@@ -1,4 +1,4 @@
-"""ElevenLabs TTS + edge-tts fallback (cross-platform)."""
+"""TTS voiceover — ElevenLabs, OpenAI TTS, edge-tts fallback (cross-platform)."""
 
 import asyncio
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import requests
 
-from .config import VOICE_ID_EN, VOICE_ID_HI, get_elevenlabs_key, run_cmd
+from .config import VOICE_ID_EN, VOICE_ID_HI, get_elevenlabs_key, _get_key, run_cmd
 from .log import log
 from .retry import with_retry
 
@@ -56,6 +56,25 @@ def _edge_tts_fallback(script: str, out_dir: Path, lang: str = "en") -> Path:
     return mp3_path
 
 
+@with_retry(max_retries=2, base_delay=2.0)
+def _call_openai_tts(script: str, out_path: Path, model: str = "tts-1", voice: str = "alloy"):
+    """Call OpenAI TTS API."""
+    api_key = _get_key("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OpenAI API key not configured")
+
+    r = requests.post(
+        "https://api.openai.com/v1/audio/speech",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"model": model, "input": script, "voice": voice, "response_format": "mp3"},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"OpenAI TTS {r.status_code}: {r.text[:200]}")
+    out_path.write_bytes(r.content)
+    return out_path
+
+
 def _say_fallback(script: str, out_dir: Path) -> Path:
     """macOS 'say' fallback TTS."""
     out_path = out_dir / "voiceover_say.aiff"
@@ -69,22 +88,53 @@ def _say_fallback(script: str, out_dir: Path) -> Path:
 
 
 def generate_voiceover(script: str, out_dir: Path, lang: str = "en") -> Path:
-    """Generate voiceover via ElevenLabs, with edge-tts/say fallback."""
+    """Generate voiceover based on config provider selection.
+
+    Providers:
+    - elevenlabs / elevenlabs_flash: ElevenLabs TTS
+    - openai_tts / openai_tts_hd: OpenAI TTS
+    - edge_tts: Microsoft Edge TTS (free)
+    - fallback: Edge TTS
+    """
+    from .config import load_config, PROVIDERS
+
+    config = load_config()
+    tts_provider = config.get("providers", {}).get("tts", "edge_tts")
+    provider_info = PROVIDERS.get("tts", {}).get(tts_provider, {})
+
     voice_id = VOICE_ID_HI if lang == "hi" else VOICE_ID_EN
-    api_key = get_elevenlabs_key()
 
-    if not api_key:
-        log("No ElevenLabs key — using Edge TTS fallback")
+    # ElevenLabs providers
+    if tts_provider in ("elevenlabs", "elevenlabs_flash"):
+        api_key = get_elevenlabs_key()
+        if api_key:
+            log(f"Generating {lang} voiceover via {provider_info.get('name', 'ElevenLabs')}...")
+            out_path = out_dir / f"voiceover_{lang}.mp3"
+            try:
+                audio_bytes = _call_elevenlabs(script, voice_id, api_key)
+                out_path.write_bytes(audio_bytes)
+                log(f"Voiceover saved: {out_path.name}")
+                return out_path
+            except Exception as e:
+                log(f"ElevenLabs failed: {e} — falling back to Edge TTS")
+        else:
+            log("No ElevenLabs key — falling back to Edge TTS")
         return _edge_tts_fallback(script, out_dir, lang)
 
-    log(f"Generating {lang} voiceover via ElevenLabs...")
-    out_path = out_dir / f"voiceover_{lang}.mp3"
+    # OpenAI TTS providers
+    if tts_provider in ("openai_tts", "openai_tts_hd"):
+        model = provider_info.get("model", "tts-1")
+        voice = "alloy"  # Default voice
+        out_path = out_dir / f"voiceover_{lang}.mp3"
+        try:
+            log(f"Generating {lang} voiceover via {provider_info.get('name', 'OpenAI TTS')}...")
+            _call_openai_tts(script, out_path, model=model, voice=voice)
+            log(f"Voiceover saved: {out_path.name}")
+            return out_path
+        except Exception as e:
+            log(f"OpenAI TTS failed: {e} — falling back to Edge TTS")
+            return _edge_tts_fallback(script, out_dir, lang)
 
-    try:
-        audio_bytes = _call_elevenlabs(script, voice_id, api_key)
-        out_path.write_bytes(audio_bytes)
-        log(f"Voiceover saved: {out_path.name}")
-        return out_path
-    except Exception as e:
-        log(f"ElevenLabs failed: {e} — using Edge TTS fallback")
-        return _edge_tts_fallback(script, out_dir, lang)
+    # Edge TTS (default / explicit)
+    log(f"Generating {lang} voiceover via Edge TTS...")
+    return _edge_tts_fallback(script, out_dir, lang)

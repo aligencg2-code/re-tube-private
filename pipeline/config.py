@@ -35,6 +35,46 @@ DURATIONS = {
 }
 
 # ─────────────────────────────────────────────────────
+# Provider catalog with pricing (per 60s video estimate)
+# ─────────────────────────────────────────────────────
+PROVIDERS = {
+    "script_ai": {
+        "claude_cli":       {"name": "Claude CLI (Max)",      "cost_60s": 0.00,   "model": None,                    "needs_key": None,              "tier": "free"},
+        "claude_sonnet":    {"name": "Claude Sonnet 4.6",     "cost_60s": 0.004,  "model": "claude-sonnet-4-6",     "needs_key": "ANTHROPIC_API_KEY", "tier": "premium"},
+        "claude_haiku":     {"name": "Claude Haiku 4.5",      "cost_60s": 0.001,  "model": "claude-haiku-4-5-20251001", "needs_key": "ANTHROPIC_API_KEY", "tier": "budget"},
+        "gemini_flash":     {"name": "Gemini 2.5 Flash",      "cost_60s": 0.001,  "model": "gemini-2.5-flash",      "needs_key": "GEMINI_API_KEY",  "tier": "budget"},
+        "gemini_pro":       {"name": "Gemini 3 Pro",          "cost_60s": 0.003,  "model": "gemini-3-pro",          "needs_key": "GEMINI_API_KEY",  "tier": "mid"},
+        "gpt4o_mini":       {"name": "GPT-4o Mini",           "cost_60s": 0.0001, "model": "gpt-4o-mini",           "needs_key": "OPENAI_API_KEY",  "tier": "cheapest"},
+        "gpt4o":            {"name": "GPT-4o",                "cost_60s": 0.003,  "model": "gpt-4o",                "needs_key": "OPENAI_API_KEY",  "tier": "mid"},
+    },
+    "image": {
+        "pexels":           {"name": "Pexels Stok Foto",      "cost_60s": 0.00,   "model": None,                    "needs_key": "PEXELS_API_KEY",  "tier": "free"},
+        "imagen4_fast":     {"name": "Imagen 4 Fast",         "cost_60s": 0.12,   "model": "imagen-4.0-fast-generate-001", "needs_key": "GEMINI_API_KEY", "tier": "budget"},
+        "imagen4":          {"name": "Imagen 4 Standard",     "cost_60s": 0.24,   "model": "imagen-4.0-generate-001", "needs_key": "GEMINI_API_KEY", "tier": "mid"},
+        "imagen4_ultra":    {"name": "Imagen 4 Ultra",        "cost_60s": 0.36,   "model": "imagen-4.0-ultra-generate-001", "needs_key": "GEMINI_API_KEY", "tier": "premium"},
+        "gemini_imagen":    {"name": "Gemini 3 Pro Image",    "cost_60s": 0.80,   "model": "gemini-3-pro-image-preview", "needs_key": "GEMINI_API_KEY", "tier": "premium"},
+        "gemini_flash_img": {"name": "Gemini 2.5 Flash Image","cost_60s": 0.23,   "model": "gemini-2.5-flash-image", "needs_key": "GEMINI_API_KEY",  "tier": "mid"},
+        "dalle3":           {"name": "DALL-E 3",              "cost_60s": 0.24,   "model": "dall-e-3",              "needs_key": "OPENAI_API_KEY",  "tier": "mid"},
+        "dalle3_hd":        {"name": "DALL-E 3 HD",           "cost_60s": 0.48,   "model": "dall-e-3-hd",           "needs_key": "OPENAI_API_KEY",  "tier": "premium"},
+    },
+    "video": {
+        "none":             {"name": "Yok (Görsel Kullan)",   "cost_60s": 0.00,   "model": None,                    "needs_key": None,              "tier": "free"},
+        "veo_lite":         {"name": "Veo 3.1 Lite",          "cost_60s": 2.25,   "model": "veo-3.1-lite-generate-preview", "needs_key": "GEMINI_API_KEY", "tier": "budget"},
+        "veo_fast":         {"name": "Veo 3.1 Fast",          "cost_60s": 4.50,   "model": "veo-3.1-fast-generate-preview", "needs_key": "GEMINI_API_KEY", "tier": "mid"},
+        "veo_standard":     {"name": "Veo 3.1 Standard",      "cost_60s": 12.00,  "model": "veo-3.1-generate-preview", "needs_key": "GEMINI_API_KEY", "tier": "premium"},
+        "veo2":             {"name": "Veo 2.0",               "cost_60s": 15.00,  "model": "veo-2.0-generate-001",  "needs_key": "GEMINI_API_KEY",  "tier": "premium"},
+    },
+    "tts": {
+        "edge_tts":         {"name": "Edge TTS (Microsoft)",  "cost_60s": 0.00,   "model": None,                    "needs_key": None,              "tier": "free"},
+        "openai_tts":       {"name": "OpenAI TTS",            "cost_60s": 0.015,  "model": "tts-1",                 "needs_key": "OPENAI_API_KEY",  "tier": "budget"},
+        "openai_tts_hd":    {"name": "OpenAI TTS HD",         "cost_60s": 0.03,   "model": "tts-1-hd",              "needs_key": "OPENAI_API_KEY",  "tier": "mid"},
+        "google_tts":       {"name": "Google Cloud TTS",      "cost_60s": 0.004,  "model": "google-wavenet",        "needs_key": "GOOGLE_TTS_KEY",  "tier": "budget"},
+        "elevenlabs_flash": {"name": "ElevenLabs Flash",      "cost_60s": 0.06,   "model": "eleven_flash_v2_5",     "needs_key": "ELEVENLABS_API_KEY", "tier": "mid"},
+        "elevenlabs":       {"name": "ElevenLabs Multilingual","cost_60s": 0.12,  "model": "eleven_multilingual_v2","needs_key": "ELEVENLABS_API_KEY", "tier": "premium"},
+    },
+}
+
+# ─────────────────────────────────────────────────────
 # Voice config — override via env or config.json
 # ─────────────────────────────────────────────────────
 VOICE_ID_EN = os.environ.get("VOICE_ID_EN", "JBFqnCBsd6RMkjVDRZzb")  # George

@@ -108,6 +108,19 @@ TEXTS = {
         "script_ai": "Script AI Sağlayıcısı",
         "image_provider": "Görsel Sağlayıcısı",
         "tts_provider": "TTS Sağlayıcısı",
+        "video_provider": "Video Sağlayıcısı",
+        "cost_calculator": "Maliyet Hesaplayıcı",
+        "cost_per_video": "Video Başına Tahmini Maliyet",
+        "total_cost": "Toplam",
+        "batch_cost": "Toplu Üretim Maliyeti",
+        "batch_count": "Video Sayısı",
+        "tier_free": "Ücretsiz",
+        "tier_cheapest": "En Ucuz",
+        "tier_budget": "Bütçe Dostu",
+        "tier_mid": "Orta",
+        "tier_premium": "Premium",
+        "openai_key": "OpenAI API Key",
+        "google_tts_key": "Google Cloud TTS Key",
         "api_keys": "API Anahtarları",
         "save_config": "Yapılandırmayı Kaydet",
         "config_saved": "Yapılandırma kaydedildi!",
@@ -248,6 +261,19 @@ TEXTS = {
         "script_ai": "Script AI Provider",
         "image_provider": "Image Provider",
         "tts_provider": "TTS Provider",
+        "video_provider": "Video Provider",
+        "cost_calculator": "Cost Calculator",
+        "cost_per_video": "Estimated Cost Per Video",
+        "total_cost": "Total",
+        "batch_cost": "Batch Production Cost",
+        "batch_count": "Number of Videos",
+        "tier_free": "Free",
+        "tier_cheapest": "Cheapest",
+        "tier_budget": "Budget",
+        "tier_mid": "Mid-Range",
+        "tier_premium": "Premium",
+        "openai_key": "OpenAI API Key",
+        "google_tts_key": "Google Cloud TTS Key",
         "api_keys": "API Keys",
         "save_config": "Save Configuration",
         "config_saved": "Configuration saved!",
@@ -1383,25 +1409,28 @@ def get_providers(config):
     return {
         "script_ai": providers.get("script_ai", "claude_cli"),
         "image": providers.get("image", "pexels"),
+        "video": providers.get("video", "none"),
+        "tts": providers.get("tts", "edge_tts"),
+    }
+
+
+def get_active_providers():
+    providers = config.get("providers", {})
+    return {
+        "script_ai": providers.get("script_ai", "claude_cli"),
+        "image": providers.get("image", "pexels"),
+        "video": providers.get("video", "none"),
         "tts": providers.get("tts", "edge_tts"),
     }
 
 
 def get_provider_display_name(provider_key):
-    """Human-readable provider names."""
-    names = {
-        "claude_cli": "Claude CLI",
-        "claude_api": "Claude API",
-        "gemini_script": "Gemini API",
-        "pexels": "Pexels",
-        "gemini_imagen": "Gemini Imagen",
-        "veo": "Google Veo (AI Video)",
-        "runway": "Runway ML",
-        "edge_tts": "Edge TTS",
-        "elevenlabs": "ElevenLabs",
-        "google_tts": "Google Cloud TTS",
-    }
-    return names.get(provider_key, provider_key)
+    """Human-readable provider names from PROVIDERS catalog."""
+    from pipeline.config import PROVIDERS
+    for cat in PROVIDERS.values():
+        if provider_key in cat:
+            return cat[provider_key]["name"]
+    return provider_key
 
 
 def time_ago(job_id):
@@ -1441,6 +1470,8 @@ has_claude = check_claude_cli() or bool(config.get("ANTHROPIC_API_KEY"))
 has_gemini = bool(config.get("GEMINI_API_KEY"))
 has_pexels = bool(config.get("PEXELS_API_KEY"))
 has_elevenlabs = bool(config.get("ELEVENLABS_API_KEY"))
+has_openai = bool(config.get("OPENAI_API_KEY"))
+has_google_tts = bool(config.get("GOOGLE_TTS_KEY"))
 has_yt_token = (SKILL_DIR / "youtube_token.json").exists()
 CHANNELS_DIR = SKILL_DIR / "channels"
 
@@ -1616,8 +1647,10 @@ with st.sidebar:
     services = [
         ("Claude AI", has_claude),
         ("Gemini Vision", has_gemini),
+        ("OpenAI", has_openai),
         ("Pexels Photos", has_pexels),
         ("ElevenLabs TTS", has_elevenlabs),
+        ("Google Cloud TTS", has_google_tts),
         ("FFmpeg", has_ffmpeg),
         ("YouTube OAuth", has_yt_token),
     ]
@@ -2297,64 +2330,116 @@ elif page == "Settings":
     """, unsafe_allow_html=True)
 
     # --- Provider Selection ---
+    from pipeline.config import PROVIDERS
+
     st.markdown(f"### {t('provider_selection')}")
 
-    # Script AI
-    script_ai_options = {
-        "claude_cli": f"Claude CLI ({t('free')}, Claude Max)",
-        "claude_api": f"Claude API ({t('needs_key')}: ANTHROPIC_API_KEY)",
-        "gemini_script": f"Gemini API ({t('needs_key')}: GEMINI_API_KEY)",
+    tier_labels = {
+        "free": t("tier_free"),
+        "cheapest": t("tier_cheapest"),
+        "budget": t("tier_budget"),
+        "mid": t("tier_mid"),
+        "premium": t("tier_premium"),
     }
-    script_ai_keys = list(script_ai_options.keys())
+
+    def format_provider(key, category):
+        p = PROVIDERS[category][key]
+        cost = f"${p['cost_60s']:.3f}" if p['cost_60s'] > 0 else t("tier_free")
+        tier = tier_labels.get(p["tier"], p["tier"])
+        return f"{p['name']} — {cost} [{tier}]"
+
+    # Script AI
+    script_ai_keys = list(PROVIDERS["script_ai"].keys())
     current_script_ai = providers["script_ai"]
     script_ai_idx = script_ai_keys.index(current_script_ai) if current_script_ai in script_ai_keys else 0
 
-    new_script_ai = st.radio(
+    new_script = st.selectbox(
         t("script_ai"),
         script_ai_keys,
         index=script_ai_idx,
-        format_func=lambda x: script_ai_options[x],
+        format_func=lambda x: format_provider(x, "script_ai"),
         key="prov_script_ai",
     )
 
-    # Image / Video provider
-    image_options = {
-        "pexels": f"Pexels Stock Photos ({t('free')})",
-        "gemini_imagen": "Gemini Imagen (AI Görsel)",
-        "veo": "Google Veo (AI Video)",
-        "runway": f"Runway ML ({t('coming_soon')})",
-    }
-    selectable_image = ["pexels", "gemini_imagen", "veo"]
+    # Image provider
+    image_keys = list(PROVIDERS["image"].keys())
     current_image = providers["image"]
-    image_idx = selectable_image.index(current_image) if current_image in selectable_image else 0
+    image_idx = image_keys.index(current_image) if current_image in image_keys else 0
 
-    new_image = st.radio(
+    new_image = st.selectbox(
         t("image_provider"),
-        selectable_image,
+        image_keys,
         index=image_idx,
-        format_func=lambda x: image_options[x],
+        format_func=lambda x: format_provider(x, "image"),
         key="prov_image",
     )
-    st.caption(f"~~Runway ML~~ -- {t('coming_soon')}")
+
+    # Video provider
+    video_keys = list(PROVIDERS["video"].keys())
+    current_video = providers.get("video", "none")
+    video_idx = video_keys.index(current_video) if current_video in video_keys else 0
+
+    new_video = st.selectbox(
+        t("video_provider"),
+        video_keys,
+        index=video_idx,
+        format_func=lambda x: format_provider(x, "video"),
+        key="prov_video",
+    )
 
     # TTS provider
-    tts_options = {
-        "edge_tts": f"Edge TTS ({t('free')})",
-        "elevenlabs": f"ElevenLabs ({t('premium')})",
-        "google_tts": f"Google Cloud TTS ({t('coming_soon')})",
-    }
-    tts_keys = list(tts_options.keys())
+    tts_keys = list(PROVIDERS["tts"].keys())
     current_tts = providers["tts"]
     tts_idx = tts_keys.index(current_tts) if current_tts in tts_keys else 0
 
-    new_tts = st.radio(
+    new_tts = st.selectbox(
         t("tts_provider"),
-        [k for k in tts_keys if k != "google_tts"],
-        index=min(tts_idx, 1),
-        format_func=lambda x: tts_options[x],
+        tts_keys,
+        index=tts_idx,
+        format_func=lambda x: format_provider(x, "tts"),
         key="prov_tts",
     )
-    st.caption(f"~~Google Cloud TTS~~ -- {t('coming_soon')}")
+
+    st.divider()
+
+    # --- Cost Calculator ---
+    script_cost = PROVIDERS["script_ai"][new_script]["cost_60s"]
+    image_cost = PROVIDERS["image"][new_image]["cost_60s"]
+    video_cost = PROVIDERS["video"][new_video]["cost_60s"]
+    tts_cost = PROVIDERS["tts"][new_tts]["cost_60s"]
+    total = script_cost + image_cost + video_cost + tts_cost
+
+    st.markdown(f"### {t('cost_calculator')}")
+    st.markdown(f"""
+<div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+        <span style="color: var(--text-dim);">Script AI</span>
+        <span style="color: var(--text-normal);">${script_cost:.4f}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+        <span style="color: var(--text-dim);">Görsel (6x)</span>
+        <span style="color: var(--text-normal);">${image_cost:.2f}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+        <span style="color: var(--text-dim);">Video</span>
+        <span style="color: var(--text-normal);">${video_cost:.2f}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+        <span style="color: var(--text-dim);">TTS</span>
+        <span style="color: var(--text-normal);">${tts_cost:.4f}</span>
+    </div>
+    <hr style="border-color: var(--border-subtle); margin: 0.8rem 0;">
+    <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--accent-primary); font-weight: 600;">{t('total_cost')}</span>
+        <span style="color: var(--accent-primary); font-weight: 600; font-size: 1.2rem;">${total:.2f}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # Batch calculator
+    batch_count = st.slider(t("batch_count"), 1, 100, 10)
+    batch_total = total * batch_count
+    st.markdown(f"**{t('batch_cost')}:** {batch_count} video = **${batch_total:.2f}**")
 
     st.divider()
 
@@ -2363,17 +2448,24 @@ elif page == "Settings":
 
     new_anthropic = st.text_input("Anthropic API Key", value=config.get("ANTHROPIC_API_KEY", ""), type="password")
     new_gemini = st.text_input("Gemini API Key", value=config.get("GEMINI_API_KEY", ""), type="password")
+    new_openai = st.text_input(t("openai_key"), value=config.get("OPENAI_API_KEY", ""), type="password")
     new_pexels = st.text_input("Pexels API Key", value=config.get("PEXELS_API_KEY", ""), type="password")
     new_elevenlabs = st.text_input("ElevenLabs API Key", value=config.get("ELEVENLABS_API_KEY", ""), type="password")
+    new_google_tts = st.text_input(t("google_tts_key"), value=config.get("GOOGLE_TTS_KEY", ""), type="password")
 
     if st.button(t("save_config"), use_container_width=True):
         config["ANTHROPIC_API_KEY"] = new_anthropic
         config["GEMINI_API_KEY"] = new_gemini
         config["PEXELS_API_KEY"] = new_pexels
         config["ELEVENLABS_API_KEY"] = new_elevenlabs
+        if new_openai:
+            config["OPENAI_API_KEY"] = new_openai
+        if new_google_tts:
+            config["GOOGLE_TTS_KEY"] = new_google_tts
         config["providers"] = {
-            "script_ai": new_script_ai,
+            "script_ai": new_script,
             "image": new_image,
+            "video": new_video,
             "tts": new_tts,
         }
         save_config(config)

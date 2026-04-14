@@ -1,4 +1,4 @@
-"""B-roll generation — Veo video > Gemini Imagen > Pexels stock > fallback."""
+"""B-roll generation — Veo video > Imagen 4 > Gemini Imagen > DALL-E 3 > Pexels stock > fallback."""
 
 import base64
 import re
@@ -41,6 +41,53 @@ def _generate_image_gemini(prompt: str, output_path: Path, api_key: str):
             output_path.write_bytes(base64.b64decode(img_b64))
             return
     raise RuntimeError("No image in Gemini response")
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_imagen4(prompt: str, output_path: Path, api_key: str,
+                            model: str = "imagen-4.0-generate-001"):
+    """Generate image via Imagen 4 predict API."""
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predict",
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        json={
+            "instances": [{"prompt": prompt}],
+            "parameters": {"sampleCount": 1, "aspectRatio": "9:16"},
+        },
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Imagen 4 {r.status_code}: {r.text[:200]}")
+    predictions = r.json().get("predictions", [])
+    if not predictions:
+        raise RuntimeError("Imagen 4: no image returned")
+    img_b64 = predictions[0].get("bytesBase64Encoded", "")
+    if not img_b64:
+        raise RuntimeError("Imagen 4: empty image data")
+    output_path.write_bytes(base64.b64decode(img_b64))
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_dalle(prompt: str, output_path: Path, api_key: str, hd: bool = False):
+    """Generate image via OpenAI DALL-E 3."""
+    r = requests.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": "dall-e-3",
+            "prompt": prompt,
+            "n": 1,
+            "size": "1024x1792" if hd else "1024x1024",
+            "quality": "hd" if hd else "standard",
+        },
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"DALL-E {r.status_code}: {r.text[:200]}")
+
+    img_url = r.json()["data"][0]["url"]
+    img_data = requests.get(img_url, timeout=60).content
+    output_path.write_bytes(img_data)
 
 
 def _generate_video_veo(prompt: str, output_path: Path, api_key: str,
@@ -197,18 +244,24 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
     """Generate b-roll based on config provider selection.
 
     Providers:
-    - veo: Generate AI video clips via Google Veo (returns .mp4 files)
-    - gemini_imagen: Generate AI images via Gemini (returns .png files)
+    - veo_*: Generate AI video clips via Google Veo (returns .mp4 files)
+    - imagen4 / imagen4_fast / imagen4_ultra: Imagen 4 AI images
+    - gemini_imagen / gemini_flash_img: Gemini native image generation
+    - dalle3 / dalle3_hd: OpenAI DALL-E 3 images
     - pexels: Stock photos from Pexels (returns .png files)
 
     When veo is selected, returns .mp4 files directly — assemble.py
     should handle both image and video inputs.
     """
-    from .config import load_config
+    from .config import load_config, PROVIDERS
 
     config = load_config()
     image_provider = config.get("providers", {}).get("image", "pexels")
+    provider_info = PROVIDERS.get("image", {}).get(image_provider, {})
+    model = provider_info.get("model")
+
     gemini_key = get_gemini_key()
+    openai_key = _get_key("OPENAI_API_KEY")
     pexels_key = _get_key("PEXELS_API_KEY")
     orientation = "portrait" if height > width else "landscape"
     frames = []
@@ -217,27 +270,54 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
         success = False
 
         # Provider: Veo (AI video generation)
-        if image_provider == "veo" and gemini_key:
+        if image_provider.startswith("veo") and gemini_key:
             out_path = out_dir / f"broll_{i}.mp4"
             try:
-                log(f"Generating b-roll video {i+1}/{len(prompts)} via Veo...")
-                _generate_video_veo(prompt, out_path, gemini_key, duration=5, aspect=aspect)
+                veo_model = model or "veo-2.0-generate-001"
+                log(f"Generating b-roll video {i+1}/{len(prompts)} via {provider_info.get('name', 'Veo')}...")
+                _generate_video_veo(prompt, out_path, gemini_key, duration=5, aspect=aspect, model=veo_model)
                 frames.append(out_path)
                 success = True
             except Exception as e:
                 log(f"Veo failed for clip {i+1}: {e}")
 
-        # Provider: Gemini Imagen (AI images)
-        if not success and image_provider in ("gemini_imagen", "veo") and gemini_key:
+        # Provider: Imagen 4 (predict API)
+        if not success and image_provider.startswith("imagen4") and gemini_key:
             out_path = out_dir / f"broll_{i}.png"
             try:
-                log(f"Generating b-roll image {i+1}/{len(prompts)} via Gemini Imagen...")
+                imagen_model = model or "imagen-4.0-generate-001"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'Imagen 4')}...")
+                _generate_image_imagen4(prompt, out_path, gemini_key, model=imagen_model)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Imagen 4 failed for frame {i+1}: {e}")
+
+        # Provider: Gemini Imagen (native image generation)
+        if not success and image_provider.startswith("gemini") and gemini_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'Gemini Imagen')}...")
                 _generate_image_gemini(prompt, out_path, gemini_key)
                 _resize_to_format(out_path, width, height)
                 frames.append(out_path)
                 success = True
             except Exception as e:
                 log(f"Gemini Imagen failed for frame {i+1}: {e}")
+
+        # Provider: DALL-E 3
+        if not success and image_provider.startswith("dalle") and openai_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                hd = image_provider == "dalle3_hd"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'DALL-E 3')}...")
+                _generate_image_dalle(prompt, out_path, openai_key, hd=hd)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"DALL-E failed for frame {i+1}: {e}")
 
         # Provider: Pexels (stock photos — default or fallback)
         if not success and pexels_key:

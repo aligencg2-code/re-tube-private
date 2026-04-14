@@ -1,47 +1,90 @@
-"""Claude script generation."""
+"""AI script generation — supports Claude, OpenAI, and Gemini providers."""
 
 import json
 
-from .config import get_anthropic_client, get_anthropic_key, get_claude_backend, call_claude_cli, has_claude_cli, DURATIONS
+from .config import get_anthropic_client, get_anthropic_key, get_gemini_key, get_claude_backend, call_claude_cli, has_claude_cli, _get_key, DURATIONS
 from .log import log
 from .research import research_topic
 from .retry import with_retry
 
 
 @with_retry(max_retries=2, base_delay=3.0)
-def _call_claude(prompt: str) -> str:
-    """Call Claude via API key or CLI — auto-detects best available method.
+def _call_script_ai(prompt: str) -> str:
+    """Call script AI based on config provider selection."""
+    from .config import load_config, PROVIDERS
 
-    Priority: API key > CLI (Claude Max) > error
-    """
-    # Try API first (works if ANTHROPIC_API_KEY is set)
-    api_key = get_anthropic_key()
-    if api_key:
-        try:
-            log("Using Claude API for script generation...")
-            client = get_anthropic_client()
-            msg = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=3000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return msg.content[0].text.strip()
-        except Exception as e:
-            log(f"Claude API failed: {e}")
+    config = load_config()
+    provider = config.get("providers", {}).get("script_ai", "claude_cli")
+    provider_info = PROVIDERS["script_ai"].get(provider, {})
+    model = provider_info.get("model")
 
-    # Try CLI (works if claude CLI installed + Claude Max subscription)
-    if has_claude_cli():
-        try:
-            log("Using Claude Max (CLI) for script generation...")
-            return call_claude_cli(prompt)
-        except Exception as e:
-            log(f"Claude CLI failed: {e}")
+    # Claude CLI (free)
+    if provider == "claude_cli":
+        if has_claude_cli():
+            try:
+                log("Using Claude CLI for script generation...")
+                return call_claude_cli(prompt)
+            except Exception as e:
+                log(f"Claude CLI failed: {e}")
+        # Fallback to API if CLI fails
 
-    raise RuntimeError(
-        "Claude erişimi bulunamadı. Şu seçeneklerden birini yapın:\n"
-        "  1. Ayarlar'dan ANTHROPIC_API_KEY girin\n"
-        "  2. Claude Code CLI kurup 'claude login' yapın"
-    )
+    # Claude API (Sonnet or Haiku)
+    if provider in ("claude_sonnet", "claude_haiku", "claude_cli"):
+        api_key = get_anthropic_key()
+        if api_key:
+            try:
+                log(f"Using {provider_info.get('name', 'Claude API')}...")
+                client = get_anthropic_client()
+                msg = client.messages.create(
+                    model=model or "claude-sonnet-4-6",
+                    max_tokens=3000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return msg.content[0].text.strip()
+            except Exception as e:
+                log(f"Claude API failed: {e}")
+
+    # OpenAI (GPT-4o, GPT-4o-mini)
+    if provider in ("gpt4o", "gpt4o_mini"):
+        openai_key = _get_key("OPENAI_API_KEY")
+        if openai_key:
+            try:
+                log(f"Using {provider_info.get('name', 'OpenAI')}...")
+                import requests
+                r = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 3000},
+                    timeout=120,
+                )
+                if r.status_code == 200:
+                    return r.json()["choices"][0]["message"]["content"].strip()
+                raise RuntimeError(f"OpenAI {r.status_code}: {r.text[:200]}")
+            except Exception as e:
+                log(f"OpenAI failed: {e}")
+
+    # Gemini (Flash, Pro)
+    if provider in ("gemini_flash", "gemini_pro"):
+        gemini_key = get_gemini_key()
+        if gemini_key:
+            try:
+                log(f"Using {provider_info.get('name', 'Gemini')}...")
+                import requests
+                r = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                    headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
+                    json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 3000}},
+                    timeout=120,
+                )
+                if r.status_code == 200:
+                    parts = r.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+                raise RuntimeError(f"Gemini {r.status_code}: {r.text[:200]}")
+            except Exception as e:
+                log(f"Gemini failed: {e}")
+
+    raise RuntimeError("Script AI erişimi bulunamadı. Ayarlar'dan API key girin.")
 
 
 def generate_draft(news: str, channel_context: str = "", lang: str = "en",
@@ -108,8 +151,8 @@ Output JSON exactly:
   "thumbnail_prompt": "..."
 }}"""
 
-    raw = _call_claude(prompt)
-    log(f"Claude raw output length: {len(raw)} chars")
+    raw = _call_script_ai(prompt)
+    log(f"AI raw output length: {len(raw)} chars")
 
     # Extract JSON from various formats Claude might return
     cleaned = raw.strip()
