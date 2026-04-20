@@ -347,6 +347,24 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
             log(f"Frame {i+1}: using color fallback")
             frames.append(_fallback_frame(i, out_dir, width, height))
 
+    # Cost tracking — one record per successful paid frame set
+    try:
+        from . import cost as _cost
+        # cost_60s in PROVIDERS catalog is "per 60s of final video" — treat
+        # generated frames as the unit-of-video, not absolute seconds.
+        paid_count = len([f for f in frames if f and f.exists() and f.stat().st_size > 1000])
+        if image_provider not in ("pexels", "pixabay", "unsplash") and paid_count > 0:
+            # Assume ~10s of video per frame on average (Ken Burns)
+            video_seconds = paid_count * 10
+            _cost.record_estimated(
+                job_id=None, stage="broll",
+                category=("video" if image_provider.startswith("veo") else "image"),
+                provider_key=image_provider, seconds=video_seconds, model=model,
+                extra={"frames": paid_count, "aspect": aspect},
+            )
+    except Exception:
+        pass
+
     return frames
 
 

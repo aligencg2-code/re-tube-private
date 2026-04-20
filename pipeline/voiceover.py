@@ -56,6 +56,28 @@ def _edge_tts_fallback(script: str, out_dir: Path, lang: str = "en") -> Path:
     return mp3_path
 
 
+@with_retry(max_retries=3, base_delay=2.0)
+def _call_voixor(script: str, voice_id: str, api_key: str) -> bytes:
+    """Call Voixor TTS (ElevenLabs-compatible voice IDs)."""
+    # Voixor enforces 5+ char minimum
+    if len(script) < 5:
+        script = script + " . . . . ."
+    r = requests.post(
+        "https://voixor.com/api.php",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={"text": script, "voice_id": voice_id},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Voixor {r.status_code}: {r.text[:200]}")
+    if not r.headers.get("content-type", "").startswith("audio"):
+        raise RuntimeError(f"Voixor returned non-audio: {r.text[:200]}")
+    return r.content
+
+
 @with_retry(max_retries=2, base_delay=2.0)
 def _call_openai_tts(script: str, out_path: Path, model: str = "tts-1", voice: str = "alloy"):
     """Call OpenAI TTS API."""
@@ -87,22 +109,56 @@ def _say_fallback(script: str, out_dir: Path) -> Path:
     return mp3_path
 
 
+def _estimate_audio_seconds(script: str) -> float:
+    """Rough voice duration based on 150 words/min (~2.5 wps)."""
+    words = max(1, len(script.split()))
+    return words / 2.5
+
+
 def generate_voiceover(script: str, out_dir: Path, lang: str = "en") -> Path:
     """Generate voiceover based on config provider selection.
 
     Providers:
     - elevenlabs / elevenlabs_flash: ElevenLabs TTS
     - openai_tts / openai_tts_hd: OpenAI TTS
+    - voixor: Voixor TR
     - edge_tts: Microsoft Edge TTS (free)
     - fallback: Edge TTS
     """
     from .config import load_config, PROVIDERS
+    from . import cost as _cost
 
     config = load_config()
     tts_provider = config.get("providers", {}).get("tts", "edge_tts")
     provider_info = PROVIDERS.get("tts", {}).get(tts_provider, {})
+    audio_seconds = _estimate_audio_seconds(script)
+
+    def _track(job_id_arg: str | None = None):
+        _cost.record_estimated(
+            job_id=job_id_arg, stage="voiceover", category="tts",
+            provider_key=tts_provider, seconds=audio_seconds,
+            model=provider_info.get("model"),
+        )
 
     voice_id = VOICE_ID_HI if lang == "hi" else VOICE_ID_EN
+
+    # Voixor (ElevenLabs-compatible voice IDs)
+    if tts_provider == "voixor":
+        api_key = _get_key("VOIXOR_API_KEY")
+        if api_key:
+            log(f"Generating {lang} voiceover via Voixor...")
+            out_path = out_dir / f"voiceover_{lang}.mp3"
+            try:
+                audio_bytes = _call_voixor(script, voice_id, api_key)
+                out_path.write_bytes(audio_bytes)
+                log(f"Voiceover saved: {out_path.name}")
+                _track()
+                return out_path
+            except Exception as e:
+                log(f"Voixor failed: {e} — falling back to Edge TTS")
+        else:
+            log("No Voixor key — falling back to Edge TTS")
+        return _edge_tts_fallback(script, out_dir, lang)
 
     # ElevenLabs providers
     if tts_provider in ("elevenlabs", "elevenlabs_flash"):
@@ -114,6 +170,7 @@ def generate_voiceover(script: str, out_dir: Path, lang: str = "en") -> Path:
                 audio_bytes = _call_elevenlabs(script, voice_id, api_key)
                 out_path.write_bytes(audio_bytes)
                 log(f"Voiceover saved: {out_path.name}")
+                _track()
                 return out_path
             except Exception as e:
                 log(f"ElevenLabs failed: {e} — falling back to Edge TTS")
@@ -130,11 +187,13 @@ def generate_voiceover(script: str, out_dir: Path, lang: str = "en") -> Path:
             log(f"Generating {lang} voiceover via {provider_info.get('name', 'OpenAI TTS')}...")
             _call_openai_tts(script, out_path, model=model, voice=voice)
             log(f"Voiceover saved: {out_path.name}")
+            _track()
             return out_path
         except Exception as e:
             log(f"OpenAI TTS failed: {e} — falling back to Edge TTS")
             return _edge_tts_fallback(script, out_dir, lang)
 
-    # Edge TTS (default / explicit)
+    # Edge TTS (default / explicit) — free, no tracking needed
     log(f"Generating {lang} voiceover via Edge TTS...")
+    _track()  # zero-cost but records the provider choice
     return _edge_tts_fallback(script, out_dir, lang)

@@ -1,7 +1,7 @@
 [project]
 name = "youtube-shorts-pipeline"
-version = "2.1.0"
-description = "AI-native YouTube Shorts production pipeline"
+version = "2.0.0"
+description = "RE-Tube · AI-native YouTube otomasyon platformu (v2.0 Enterprise)"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
@@ -13,6 +13,10 @@ dependencies = [
     "google-auth-oauthlib>=1.1.0,<2.0",
     "openai-whisper>=20231117",
     "feedparser>=6.0.0,<7.0",
+    "streamlit>=1.50,<2.0",
+    "edge-tts>=6.0,<8.0",
+    "qrcode[pil]>=7.0,<9.0",
+    "pandas>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]

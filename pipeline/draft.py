@@ -154,6 +154,21 @@ Output JSON exactly:
     raw = _call_script_ai(prompt)
     log(f"AI raw output length: {len(raw)} chars")
 
+    # Cost tracking for LLM call — estimate by output length
+    try:
+        from .config import load_config, PROVIDERS
+        from . import cost as _cost
+        prov = load_config().get("providers", {}).get("script_ai", "claude_cli")
+        prov_info = PROVIDERS.get("script_ai", {}).get(prov, {})
+        # Use 60s-equivalent cost (one draft call ≈ one video's worth of LLM usage)
+        _cost.record_estimated(
+            job_id=None, stage="draft", category="script_ai",
+            provider_key=prov, seconds=60, model=prov_info.get("model"),
+            extra={"output_chars": len(raw)},
+        )
+    except Exception:
+        pass
+
     # Extract JSON from various formats Claude might return
     cleaned = raw.strip()
 

@@ -63,6 +63,23 @@ class PipelineState:
         """Clear all pipeline state (for --force)."""
         self.draft["_pipeline_state"] = {}
 
+    def reset_from_stage(self, stage: str) -> list[str]:
+        """Clear the given stage and every stage after it. Returns reset list.
+
+        Use case: user hits "retry from voiceover" — keep research/draft/broll
+        completion markers, wipe voiceover/captions/.../upload so produce will
+        regenerate from that point onwards.
+        """
+        if stage not in STAGES:
+            raise ValueError(f"Unknown stage: {stage}. Valid: {STAGES}")
+        idx = STAGES.index(stage)
+        dropped = []
+        for s in STAGES[idx:]:
+            if s in self.state:
+                del self.state[s]
+                dropped.append(s)
+        return dropped
+
     def summary(self) -> str:
         """Human-readable status of all stages."""
         lines = []

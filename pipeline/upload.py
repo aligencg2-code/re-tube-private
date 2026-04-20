@@ -15,8 +15,19 @@ def upload_to_youtube(
     lang: str = "en",
     thumbnail_path: Path = None,
     token_path_override: str = None,
+    publish_at: str | None = None,
+    privacy_status: str = "private",
+    playlist_id: str | None = None,
 ) -> str:
-    """Upload video to YouTube with metadata, captions, and optional thumbnail."""
+    """Upload video to YouTube with metadata, captions, and optional thumbnail.
+
+    Scheduled publish: pass `publish_at` as ISO-8601 UTC string (e.g.
+    "2026-04-21T09:00:00Z"). YouTube requires privacyStatus=private together
+    with a publishAt in the future; YouTube flips it to public at that time.
+
+    Immediate publish: set publish_at=None and privacy_status to one of
+    "public", "unlisted", or "private".
+    """
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
@@ -40,6 +51,17 @@ def upload_to_youtube(
     youtube = build("youtube", "v3", credentials=creds)
     log(f"Uploading {video_path.name}...")
 
+    # Scheduled publish: YouTube requires privacy=private + publishAt in future
+    if publish_at:
+        status_block = {
+            "privacyStatus": "private",
+            "publishAt": publish_at,
+            "selfDeclaredMadeForKids": False,
+        }
+        log(f"Scheduled for publish at {publish_at} (UTC)")
+    else:
+        status_block = {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False}
+
     body = {
         "snippet": {
             "title": draft.get("youtube_title", draft["news"])[:100],
@@ -49,7 +71,7 @@ def upload_to_youtube(
             "defaultLanguage": lang,
             "defaultAudioLanguage": lang,
         },
-        "status": {"privacyStatus": "private", "selfDeclaredMadeForKids": False},
+        "status": status_block,
     }
 
     media = MediaFileUpload(str(video_path), chunksize=-1, resumable=True)
@@ -93,5 +115,43 @@ def upload_to_youtube(
             log("Thumbnail uploaded.")
         except Exception as e:
             log(f"Thumbnail upload failed: {e}")
+
+    # Auto-add to playlist if requested
+    if playlist_id:
+        try:
+            youtube.playlistItems().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "playlistId": playlist_id,
+                        "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                    }
+                },
+            ).execute()
+            log(f"Added to playlist {playlist_id}")
+            try:
+                from . import audit as _audit
+                _audit.log("playlist_added", target=video_id,
+                           details={"playlist_id": playlist_id})
+            except Exception:
+                pass
+        except Exception as e:
+            log(f"Playlist add failed: {e}")
+
+    # Audit the upload itself
+    try:
+        from . import audit as _audit
+        _audit.log(
+            "video_scheduled" if publish_at else "video_uploaded",
+            target=video_id,
+            details={
+                "url": url, "title": (draft.get("youtube_title") or "")[:80],
+                "privacy": privacy_status if not publish_at else "scheduled",
+                "publish_at": publish_at,
+                "lang": lang,
+            },
+        )
+    except Exception:
+        pass
 
     return url

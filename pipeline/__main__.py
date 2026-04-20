@@ -19,6 +19,7 @@ from .log import log, set_verbose
 def cmd_draft(args):
     from .draft import generate_draft
     from .state import PipelineState
+    from . import topic_memory
     import json
 
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,6 +35,15 @@ def cmd_draft(args):
     state.complete_stage("research")
     state.complete_stage("draft")
     state.save(out_path)
+
+    # Topic memory — record the finished draft so future enqueues can warn about duplicates
+    try:
+        topic_memory.remember(
+            args.news, job_id=job_id,
+            channel=getattr(args, "channel", None),
+        )
+    except Exception:
+        pass  # memory failures never break the pipeline
 
     print(f"\n  Draft saved: {out_path}")
     print(f"\n  Script:\n{draft['script']}")
@@ -161,6 +171,7 @@ def cmd_upload(args):
     from .upload import upload_to_youtube
     from .thumbnail import generate_thumbnail
     from .state import PipelineState
+    from .config import get_youtube_token_path
     import json
 
     draft_path = Path(args.draft)
@@ -177,24 +188,67 @@ def cmd_upload(args):
         print(f"  No produced video found for lang={lang}. Run produce first.")
         sys.exit(1)
 
-    # Thumbnail
+    # Thumbnail — single or A/B variants depending on draft flag
     thumb_path = None
+    thumb_variants: list[dict] = []
+    enable_ab = bool(draft.get("enable_ab") or draft.get("thumbnail_ab"))
+
     if force or not state.is_done("thumbnail"):
         try:
-            thumb_path = generate_thumbnail(draft, MEDIA_DIR)
-            state.complete_stage("thumbnail", {"path": str(thumb_path)})
+            if enable_ab:
+                from .thumbnail import generate_thumbnail_variants
+                thumb_variants = generate_thumbnail_variants(draft, MEDIA_DIR, count=3)
+                if thumb_variants:
+                    thumb_path = Path(thumb_variants[0]["path"])
+                    state.complete_stage("thumbnail", {
+                        "path": str(thumb_path),
+                        "variants": thumb_variants,
+                    })
+            if not thumb_path:
+                thumb_path = generate_thumbnail(draft, MEDIA_DIR)
+                state.complete_stage("thumbnail", {"path": str(thumb_path)})
         except Exception as e:
             log(f"Thumbnail generation failed: {e} — uploading without thumbnail")
     else:
         thumb_p = state.get_artifact("thumbnail", "path", "")
         if thumb_p and Path(thumb_p).exists():
             thumb_path = Path(thumb_p)
+        cached_variants = state.get_artifact("thumbnail", "variants", [])
+        if cached_variants:
+            thumb_variants = cached_variants
 
     # Upload
     if force or not state.is_done("upload"):
         token_override = getattr(args, "token_path", None)
-        url = upload_to_youtube(video_path, draft, srt_path, lang, thumb_path, token_override)
-        state.complete_stage("upload", {"url": url})
+        # Scheduled publish — either from CLI arg or from the draft itself (queue job may set it)
+        publish_at = getattr(args, "publish_at", None) or draft.get("publish_at")
+        privacy_status = getattr(args, "privacy", None) or draft.get("privacy_status") or "private"
+        playlist_id = getattr(args, "playlist_id", None) or draft.get("playlist_id")
+        url = upload_to_youtube(
+            video_path, draft, srt_path, lang, thumb_path, token_override,
+            publish_at=publish_at, privacy_status=privacy_status,
+            playlist_id=playlist_id,
+        )
+        state.complete_stage("upload", {"url": url, "publish_at": publish_at,
+                                          "privacy": privacy_status, "playlist_id": playlist_id})
+
+        # A/B enrollment — if we have >1 variant, register the test
+        if len(thumb_variants) > 1 and url:
+            try:
+                from . import thumbnail_ab
+                video_id = url.rsplit("/", 1)[-1].split("?")[0]
+                token_used = token_override or str(get_youtube_token_path())
+                channel_hint = draft.get("channel")
+                test_id = thumbnail_ab.create_test(
+                    video_id=video_id,
+                    variants=thumb_variants,
+                    token_path=token_used,
+                    channel=channel_hint,
+                    rotation_hours=draft.get("ab_rotation_hours", 24),
+                )
+                log(f"A/B test registered (id={test_id}) with {len(thumb_variants)} variants")
+            except Exception as e:
+                log(f"A/B enrollment failed (ignored): {e}")
     else:
         url = state.get_artifact("upload", "url", "")
         log(f"Skipping upload (already done): {url}")
@@ -297,6 +351,12 @@ def main():
     p_upload.add_argument("--lang", default="en", choices=["en", "de", "hi", "tr"])
     p_upload.add_argument("--force", action="store_true", help="Re-upload even if done")
     p_upload.add_argument("--token-path", default=None, help="Path to YouTube OAuth token")
+    p_upload.add_argument("--publish-at", default=None, dest="publish_at",
+                          help="ISO-8601 UTC timestamp to auto-publish (e.g. 2026-04-21T09:00:00Z). Video stays private until then.")
+    p_upload.add_argument("--privacy", default=None, choices=["private", "unlisted", "public"],
+                          help="Privacy when not scheduled (default: private)")
+    p_upload.add_argument("--playlist-id", default=None, dest="playlist_id",
+                          help="YouTube playlist ID to auto-add the video to")
 
     # run (full pipeline)
     p_run = sub.add_parser("run", help="Full pipeline: draft -> produce -> upload")
@@ -314,6 +374,22 @@ def main():
     p_topics = sub.add_parser("topics", help="Discover trending topics")
     p_topics.add_argument("--limit", type=int, default=15, help="Max topics to show")
     p_topics.add_argument("--region", default=None, help="Country code: TR, DE, GB, US, ES, IT")
+
+    # queue
+    p_queue = sub.add_parser("queue", help="Queue operations (add/list/cancel/clear)")
+    p_queue.add_argument("action", choices=["add", "list", "cancel", "clear", "status"])
+    p_queue.add_argument("--news", default=None)
+    p_queue.add_argument("--context", default="")
+    p_queue.add_argument("--lang", default="tr", choices=["en", "de", "hi", "tr"])
+    p_queue.add_argument("--mode", default="full", choices=["full", "video", "draft"])
+    p_queue.add_argument("--format", dest="video_format", default="shorts", choices=["shorts", "video"])
+    p_queue.add_argument("--duration", default="short", choices=["short", "3min", "5min", "10min"])
+    p_queue.add_argument("--channel", default=None)
+    p_queue.add_argument("--id", default=None, help="Job id for cancel")
+
+    # worker
+    p_worker = sub.add_parser("worker", help="Start background queue worker (single instance)")
+    p_worker.add_argument("--once", action="store_true", help="Process one job then exit")
 
     args = parser.parse_args()
 
@@ -359,6 +435,73 @@ def main():
         cmd_run(args)
     elif args.cmd == "topics":
         cmd_topics(args)
+    elif args.cmd == "queue":
+        cmd_queue(args)
+    elif args.cmd == "worker":
+        cmd_worker(args)
+
+
+def cmd_queue(args):
+    from . import queue as qmod
+    act = args.action
+    if act == "add":
+        if not args.news:
+            print("  Error: --news required for queue add")
+            sys.exit(1)
+        job = qmod.enqueue(
+            topic=args.news,
+            context=args.context,
+            lang=args.lang,
+            mode=args.mode,
+            video_format=args.video_format,
+            duration=args.duration,
+            channel=args.channel,
+        )
+        print(f"  Queued: {job['id']}  [{job['topic']}]")
+        print(f"  Status: {job['status']}")
+    elif act == "list":
+        jobs = qmod.list_jobs()
+        if not jobs:
+            print("  Queue empty.")
+            return
+        for j in jobs:
+            print(f"  {j['id']}  {j['status']:<10} {j.get('progress_pct', 0):3d}%  {j['topic'][:60]}")
+    elif act == "cancel":
+        if not args.id:
+            print("  Error: --id required")
+            sys.exit(1)
+        qmod.cancel_job(args.id)
+        print(f"  Cancel signalled: {args.id}")
+    elif act == "clear":
+        import json
+        for j in qmod.list_jobs(statuses=("done", "failed", "cancelled")):
+            qmod.delete_job(j["id"])
+        print("  Cleared finished jobs.")
+    elif act == "status":
+        import json as _json
+        print(_json.dumps(qmod.counts(), indent=2))
+
+
+def cmd_worker(args):
+    from . import worker as wmod
+    from . import queue as qmod
+    if args.once:
+        job = qmod.next_pending() or qmod.next_produced()
+        if not job:
+            print("  Queue empty.")
+            return
+        if not qmod.acquire_worker_lock():
+            print("  Another worker is running.")
+            return
+        try:
+            if job["status"] == "produced":
+                wmod._run_upload_job(job)
+            else:
+                wmod.process_one(job)
+        finally:
+            qmod.release_worker_lock()
+    else:
+        wmod.drain_loop()
 
 
 if __name__ == "__main__":

@@ -135,3 +135,63 @@ def generate_thumbnail(draft: dict, out_dir: Path) -> Path:
 
     log(f"Thumbnail saved: {final_path.name}")
     return final_path
+
+
+# Style modifiers that push the base prompt toward visually distinct variants
+_AB_STYLE_MODIFIERS = [
+    ("cinematic",        "cinematic lighting, dramatic shadows, high contrast, film grain"),
+    ("vibrant_bold",     "vibrant saturated colors, bold composition, high energy, punchy lighting"),
+    ("minimalist_clean", "minimalist composition, clean background, single subject, soft depth of field"),
+    ("closeup_emotion",  "close-up shot emphasizing human emotion, expressive face, shallow focus"),
+    ("text_heavy",       "large bold subject with clear negative space for title text, poster style"),
+]
+
+
+def generate_thumbnail_variants(
+    draft: dict, out_dir: Path, count: int = 3,
+) -> list[dict]:
+    """Generate N visually distinct thumbnail variants for A/B testing.
+
+    Returns list of {"path": str, "prompt": str, "style": str} dicts. Caller
+    (upload step) uploads index 0 with the video and registers the rest with
+    thumbnail_ab.create_test() for rotation.
+
+    If the API fails for a variant, that variant is skipped. If all fail,
+    an empty list is returned and the caller should fall back to the normal
+    single-thumbnail flow.
+    """
+    api_key = get_gemini_key()
+    base_prompt = draft.get("thumbnail_prompt", "Cinematic YouTube thumbnail")
+    title = draft.get("youtube_title", draft.get("news", ""))
+    job_id = draft.get("job_id", "unknown")
+
+    variants: list[dict] = []
+    styles = _AB_STYLE_MODIFIERS[:max(1, min(count, len(_AB_STYLE_MODIFIERS)))]
+
+    for i, (style_key, modifier) in enumerate(styles):
+        prompt_i = f"{base_prompt}. Style: {modifier}"
+        raw_i = out_dir / f"thumb_raw_{job_id}_v{i}.png"
+        final_i = out_dir / f"thumb_{job_id}_v{i}.png"
+        try:
+            log(f"Generating thumbnail variant {i + 1}/{len(styles)} ({style_key})...")
+            _generate_thumb_image(prompt_i, raw_i, api_key)
+            _overlay_title(raw_i, title, final_i)
+            variants.append({
+                "path": str(final_i),
+                "prompt": prompt_i,
+                "style": style_key,
+            })
+        except Exception as e:
+            log(f"Variant {style_key} failed: {e} — skipping")
+            continue
+
+    if not variants:
+        log("All variant generations failed — falling back to single thumbnail")
+        try:
+            single = generate_thumbnail(draft, out_dir)
+            variants.append({"path": str(single), "prompt": base_prompt, "style": "fallback"})
+        except Exception as e:
+            log(f"Fallback thumbnail also failed: {e}")
+
+    log(f"Generated {len(variants)} thumbnail variant(s)")
+    return variants

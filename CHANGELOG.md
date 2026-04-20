@@ -1,46 +1,113 @@
 # Changelog
 
-## [2.1.0] — 2026-02-27
+## [2.0.0] — 2026-04-20 · Enterprise Pack
+
+Büyük sürüm. 30 yeni özellik, 6000+ satır yeni kod, 301 otomatik test.
+Geriye uyumlu — mevcut müşteri verisi (drafts, media, channels, tokens)
+hiç değişmez; yeni özellikler opt-in.
+
+### Tier 1 — Starter (üretkenlik)
+- **Çoklu video kuyruğu** — arkaplanda üretim, FIFO sıralı upload, çoklu iş paralel
+- **Çökme kurtarma** — worker/power-cut sonrası iş kaldığı yerden devam eder
+- **Batch CSV upload** — 50 konu tek seferde kuyruğa, opsiyonel staggered enqueue
+- **Scheduled publish** — video private yüklenir, belirtilen UTC saatinde YouTube otomatik public yapar
+- **Retry UI** — failed job'lar için stage-seviye tekrar (sadece upload, sadece voice'tan itibaren, vb.)
+- **Cost dashboard** — günlük/aylık harcama, provider breakdown, son 30 gün grafiği
+
+### Tier 2 — Pro (kalite & büyüme)
+- **Kanal başına preset** — dil, ses, format, müzik, playlist ID, ton per kanal
+- **Thumbnail A/B test** — 3 varyant, 24 saatte bir rotasyon, views/hour ile kazanan auto-pick
+- **Playlist otomatik ekleme** — upload sonrası preset'teki playlist'e otomatik
+- **Topic memory** — SQLite + TF benzerlik, tekrar konu yakalama (paraphrase seviye)
+- **Yorum moderatörü** — Claude ile spam/soru/teşekkür/tartışma sınıflandırma, spam gizle
+- **Canlı kanal stats widget** — Dashboard'ta aboneler, izlenme, son 10 video (10 dk cache)
+- **AI Script Editor** — draft'ı düzenle, voice/caption otomatik invalidate, Claude ile regenerate
+
+### Tier 3 — Agency (satış ve ölçeklenme)
+- **Multi-tenant mode** (OPT-IN, default OFF) — tek panel, birden fazla müşteri; **otomatik backup** ile güvenli migration; YouTube OAuth token'lar korunur
+- **White-label / rebrand** — logo, ürün adı, slogan, accent rengi; CSS injection
+- **Stripe billing layer** — 5 plan (Free/Starter/Pro/Agency/Enterprise), quota enforcement, webhook handler
+- **REST API + webhooks** — Bearer token auth, `/v1/jobs` POST, `/v1/stream` SSE (gelecek), per-job webhook_url
+- **Audit log** — her kritik aksiyonun JSONL kaydı, filtered query, CSV export
+
+### Tier 4 — Enterprise (rekabetçi avantaj)
+- **Viral potansiyel skoru** — 6 sinyalli heuristic + Claude LLM (başlık hook, uzunluk, duygu, sayı, saturation, model)
+- **Rakip kanal takibi** — YouTube Data API ile kanal izleme, top performers, topic gap analizi
+- **Haber watcher** — RSS feed, anahtar kelime filtresi, Telegram/webhook bildirimi, auto-queue
+- **Sesli klon** — ElevenLabs Instant Voice Cloning, 30-90sn sample → özel voice_id
+- **LoRA fine-tuning** — Replicate + Flux/SDXL, karakter tutarlılığı için özel model
+- **Otomatik çeviri fan-out** — 1 TR video → 10 dil → 10 kanal (Claude ile script/title/description çevrilir)
+- **Watermark / reupload tespiti** — audio fingerprint (chromaprint + fallback), Hamming distance ile kopya yakalama
+
+### Closing — Demo & Delivery
+- **1-dakika live demo** — tek tık, random konu, ucuz provider stack
+- **Mobil QR preview** — iş/video/URL için QR kod üret, telefonda aç
+- **Zamanlayıcı** — cron benzeri, gece modu burst, günlük topic pool rotation
+- **Telegram bot** — `/yap konu`, `/durum`, `/kuyruk`, `/stat` komutları
+- **Gelir tahmini** — niche + country CPM ile AdSense projeksiyonu, Shorts penalty
+- **SSE real-time** — job status değişikliklerini real-time stream
+
+### Sağlayıcı kataloğu
+97 sağlayıcı:
+- **Script AI** (25): Claude, GPT-4o, Gemini, Groq Llama, DeepSeek, Mistral, xAI Grok, Perplexity, OpenRouter, Together, Fireworks, Qwen
+- **Görsel** (23): Pexels, Pixabay, Unsplash, Imagen 4, DALL-E, SD3, SDXL, Flux (Pro/Dev/Schnell), Ideogram, Recraft, Leonardo, Replicate
+- **Video** (14): Veo 3.1, Runway Gen-3, Luma Ray 2, Kling V2, Minimax Hailuo, Pika 2.0, Sora 2
+- **TTS** (23): Edge, OpenAI, ElevenLabs (Flash/v2/Turbo), **Voixor (TR)**, PlayHT, Cartesia, Deepgram, Azure, Murf, Resemble, Fish Audio, Coqui, Piper
+- **Müzik** (6): Bundled, Suno v4, Udio, Stable Audio, Mubert, Soundraw
+- **Caption** (6): Whisper (local/API), Deepgram Nova-3, AssemblyAI, Speechmatics, Groq Whisper
+
+### Güvenlik
+- Multi-tenant açma/kapama **otomatik yedek** alır (`.youtube-shorts-pipeline.backup.<timestamp>/`)
+- API token'lar tek seferlik gösterilir, hash preview ile listelenir
+- Audit log her destructive aksiyonu kaydeder
+- YouTube OAuth token'lar migration sırasında bit-bit korunur
+- Tüm modüllerde fail-safe: cost/audit/SSE çağrıları try/except ile sarılı, ana pipeline'ı asla düşürmez
+
+### Teknik
+- 301 otomatik test, 26 yeni modül
+- Yeni bağımlılıklar: streamlit, edge-tts, qrcode[pil], pandas
+- Python 3.10+ (3.12 test edildi)
+- Backward compatible: mevcut config.json, drafts/, media/, channels/, youtube_token.json olduğu gibi çalışır
+- pyproject.toml + version.json → 2.0.0
+
+### Bilinen limitler
+- Tier 4 modüllerinin bazıları (LoRA, voice clone) **3rd party API key gerektirir** (Replicate, ElevenLabs Pro) — key yoksa graceful degrade
+- Tier 3 Stripe billing sadece abstraction layer — gerçek Stripe bağlantısı için müşteri kendi webhook secret'ını girmeli
+- Watermark chromaprint için ffmpeg'in chromaprint filtresi gerek — yoksa audio digest fallback'i kullanır (düşük hassasiyet)
+
+---
+
+## [2.1.0] — 2026-02-27 (eski — artık 2.0 olarak yeniden isimlendirildi)
 
 Security audit fixes ported to v2 modular architecture.
 
 ### Security
-- **Fix TOCTOU race in credential file writes.** `write_secret_file()` in `pipeline/config.py` now uses `os.open()` with `0o600` mode to atomically create files with correct permissions, eliminating the brief window where credentials were world-readable. Also applied to `scripts/setup_youtube_oauth.py`.
-- **Escape ffmpeg concat file paths.** Single quotes in file paths are now properly escaped in `pipeline/assemble.py` for the ffmpeg concat demuxer.
-- **Pin all dependency versions.** `pyproject.toml` and `requirements.txt` now use compatible-release bounds (e.g., `anthropic>=0.39.0,<1.0`) to reduce supply-chain risk.
+- TOCTOU race fix for credential file writes via `os.open()` with `0o600`
+- ffmpeg concat file paths properly escaped
+- All dependency versions pinned with compatible-release bounds
 
 ### Fixed
-- **Clear error on expired OAuth token without refresh token.** `pipeline/upload.py` now raises a descriptive `RuntimeError` instead of silently attempting to use expired credentials.
+- Clear error on expired OAuth token without refresh token
 
 ### Added
-- Security section in `README.md` documenting all hardening measures.
-- `CHANGELOG.md` (this file).
+- Security section in README.md
+- CHANGELOG.md
 
-## [2.0.0] — 2026-02-27
+## [2.0.0-beta] — 2026-02-27 (önceki 2.0.0)
 
-Major restructure: modular `pipeline/` package with new features.
+İlk modüler yeniden yapılanma.
 
 ### Added
-- **Burned-in captions** — word-by-word highlight via ASS subtitles (Whisper word timestamps).
-- **Background music** — bundled royalty-free tracks with automatic voice-ducking.
-- **Topic engine** — discover trending topics from Reddit, RSS, Google Trends, Twitter, TikTok.
-- **Thumbnail generation** — Gemini Imagen + Pillow text overlay, auto-uploaded.
-- **Resume capability** — pipeline state tracked per stage, re-runs skip completed work.
-- **Retry logic** — `@with_retry` exponential backoff on all API calls.
-- **Structured logging** — file + console logging, `--verbose` for debug output.
-- **Claude Max support** — use Claude CLI as alternative to API key.
-- **78 tests** — comprehensive test suite across all modules.
-- `pyproject.toml` with proper packaging.
-
-### Security (carried forward from audit)
-- Gemini API key sent via `x-goog-api-key` header, not URL query parameter.
-- Sanitized API error responses — no credential reflection.
-- YouTube OAuth scope narrowed to `youtube.upload` + `youtube.force-ssl`.
-- Default upload privacy set to `private`.
-- Prompt injection mitigation — snippet truncation (300 chars) + boundary markers.
-- LLM output validation — type-checking on all draft fields.
-- `.gitignore` covers credential files, `.env`, output directories.
+- Burned-in captions (word-by-word, ASS subtitles + Whisper timestamps)
+- Background music (bundled royalty-free + voice-ducking)
+- Topic engine (Reddit/RSS/Google Trends/Twitter/TikTok)
+- Thumbnail generation (Gemini Imagen + Pillow overlay)
+- Resume capability (state tracked per stage)
+- Retry logic (exponential backoff on all API calls)
+- Structured logging
+- Claude Max support via CLI
+- 78 test
 
 ## [1.0.0] — 2026-02-27
 
-Initial release. Single-file pipeline: draft → produce → upload.
+İlk sürüm. Tek dosya pipeline: draft → produce → upload.
