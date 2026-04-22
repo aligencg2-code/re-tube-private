@@ -1,8 +1,8 @@
 [project]
 name = "youtube-shorts-pipeline"
-version = "2.0.0"
+version = "2.0.1"
 description = "RE-Tube · AI-native YouTube otomasyon platformu (v2.0 Enterprise)"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 license = "MIT"
 dependencies = [
     "anthropic>=0.39.0,<1.0",
@@ -11,7 +11,6 @@ dependencies = [
     "google-api-python-client>=2.100.0,<3.0",
     "google-auth>=2.23.0,<3.0",
     "google-auth-oauthlib>=1.1.0,<2.0",
-    "openai-whisper>=20231117",
     "feedparser>=6.0.0,<7.0",
     "streamlit>=1.50,<2.0",
     "edge-tts>=6.0,<8.0",
@@ -21,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 trends = ["pytrends"]
+whisper_local = ["openai-whisper>=20231117"]
 dev = ["pytest", "pytest-mock"]
 
 [project.scripts]

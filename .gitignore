@@ -27,3 +27,8 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Internal sales/marketing (not shipped to customers)
+FORUM_POST_*.txt
+FORUM_BANNER.html
+ROADMAP.md

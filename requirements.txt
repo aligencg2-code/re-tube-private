@@ -5,8 +5,25 @@ google-auth>=2.23.0,<3.0
 google-auth-oauthlib>=1.1.0,<2.0
 pillow>=10.0.0,<12.0
 requests>=2.31.0,<3.0
-openai-whisper>=20231117
 feedparser>=6.0.0,<7.0
 
-# Optional — trending topics
+# Panel + diger
+streamlit>=1.50,<2.0
+edge-tts>=6.0,<8.0
+qrcode[pil]>=7.0,<9.0
+pandas>=2.0,<3.0
+
+# Opsiyonel — altyazi saglayicilari
+# Asagidakilerden EN AZ BIRI aktif olmali:
+#   A. Lokal Whisper (agir ~2GB, GPU onerilir):
+#      pip install openai-whisper
+#   B. Groq Whisper API (ucretsiz tier, hizli):
+#      Panel -> Ayarlar -> GROQ_API_KEY gir
+#   C. OpenAI Whisper API (ucretli):
+#      Panel -> Ayarlar -> OPENAI_API_KEY gir
+#   D. Deepgram Nova-3:
+#      Panel -> Ayarlar -> DEEPGRAM_API_KEY gir
+# Hicbiri yoksa video altyazisiz uretilir (upload yine de calisir).
+
+# Opsiyonel — trending topics
 # pytrends>=4.9.0

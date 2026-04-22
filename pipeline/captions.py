@@ -19,33 +19,73 @@ def _has_ass_filter() -> bool:
 
 
 def _whisper_word_timestamps(audio_path: Path, lang: str = "en") -> list[dict]:
-    """Get word-level timestamps from Whisper.
+    """Get word-level timestamps. Tries providers in order:
+
+      1. openai-whisper (local) — if installed
+      2. Groq Whisper API — if GROQ_API_KEY set (ultra-fast, free tier)
+      3. OpenAI Whisper API — if OPENAI_API_KEY set
+      4. Deepgram — if DEEPGRAM_API_KEY set
 
     Returns list of {"word": str, "start": float, "end": float}.
+    Empty list if no provider available.
     """
+    # --- Attempt 1: Local whisper (fastest if installed, offline-friendly) ---
+    words = _try_local_whisper(audio_path, lang)
+    if words:
+        return words
+
+    # --- Attempt 2: Groq Whisper API (fast, cheap) ---
+    words = _try_groq_whisper(audio_path, lang)
+    if words:
+        return words
+
+    # --- Attempt 3: OpenAI Whisper API ---
+    words = _try_openai_whisper_api(audio_path, lang)
+    if words:
+        return words
+
+    # --- Attempt 4: Deepgram ---
+    words = _try_deepgram(audio_path, lang)
+    if words:
+        return words
+
+    log("No caption provider available (install 'openai-whisper' pip paketi veya "
+        "GROQ_API_KEY / OPENAI_API_KEY / DEEPGRAM_API_KEY ayarlayin)")
+    return []
+
+
+def _try_local_whisper(audio_path: Path, lang: str) -> list[dict]:
+    """Try local openai-whisper. Returns empty list if not available."""
     try:
         import whisper
     except ImportError:
-        log("Whisper not installed — skipping word timestamps")
         return []
 
     # Use 'turbo' for speed+quality, 'medium' fallback for lower VRAM
     model_name = "turbo"
-    log(f"Running Whisper ({model_name}) for word-level timestamps...")
+    log(f"Running local Whisper ({model_name}) for word-level timestamps...")
     try:
         model = whisper.load_model(model_name)
     except Exception:
         model_name = "medium"
         log(f"Turbo unavailable, falling back to {model_name}")
-        model = whisper.load_model(model_name)
+        try:
+            model = whisper.load_model(model_name)
+        except Exception as e:
+            log(f"Local whisper failed: {e}")
+            return []
 
-    result = model.transcribe(
-        str(audio_path),
-        language=lang[:2],
-        word_timestamps=True,
-        condition_on_previous_text=True,
-        temperature=0.0,
-    )
+    try:
+        result = model.transcribe(
+            str(audio_path),
+            language=lang[:2],
+            word_timestamps=True,
+            condition_on_previous_text=True,
+            temperature=0.0,
+        )
+    except Exception as e:
+        log(f"Local whisper transcribe failed: {e}")
+        return []
 
     words = []
     for segment in result.get("segments", []):
@@ -55,9 +95,123 @@ def _whisper_word_timestamps(audio_path: Path, lang: str = "en") -> list[dict]:
                 "start": w["start"],
                 "end": w["end"],
             })
-
-    log(f"Got {len(words)} word timestamps.")
+    log(f"Local whisper → {len(words)} word timestamps.")
     return words
+
+
+def _try_groq_whisper(audio_path: Path, lang: str) -> list[dict]:
+    """Groq provides free Whisper Large v3 with word timestamps.
+    Very fast (~10x faster than OpenAI). Requires GROQ_API_KEY.
+    """
+    from .config import _get_key
+    api_key = _get_key("GROQ_API_KEY")
+    if not api_key:
+        return []
+    try:
+        import requests
+        log("Running Groq Whisper API for word-level timestamps...")
+        with open(audio_path, "rb") as f:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (audio_path.name, f, "audio/mpeg")},
+                data={
+                    "model": "whisper-large-v3",
+                    "language": lang[:2],
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "word",
+                },
+                timeout=120,
+            )
+        if not r.ok:
+            log(f"Groq whisper failed: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        words = [
+            {"word": w["word"].strip(), "start": w["start"], "end": w["end"]}
+            for w in data.get("words", [])
+        ]
+        log(f"Groq whisper → {len(words)} word timestamps.")
+        return words
+    except Exception as e:
+        log(f"Groq whisper error: {e}")
+        return []
+
+
+def _try_openai_whisper_api(audio_path: Path, lang: str) -> list[dict]:
+    """OpenAI's Whisper API. Paid but reliable. Requires OPENAI_API_KEY."""
+    from .config import _get_key
+    api_key = _get_key("OPENAI_API_KEY")
+    if not api_key:
+        return []
+    try:
+        import requests
+        log("Running OpenAI Whisper API for word-level timestamps...")
+        with open(audio_path, "rb") as f:
+            r = requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (audio_path.name, f, "audio/mpeg")},
+                data={
+                    "model": "whisper-1",
+                    "language": lang[:2],
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "word",
+                },
+                timeout=180,
+            )
+        if not r.ok:
+            log(f"OpenAI whisper failed: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        words = [
+            {"word": w["word"].strip(), "start": w["start"], "end": w["end"]}
+            for w in data.get("words", [])
+        ]
+        log(f"OpenAI whisper → {len(words)} word timestamps.")
+        return words
+    except Exception as e:
+        log(f"OpenAI whisper error: {e}")
+        return []
+
+
+def _try_deepgram(audio_path: Path, lang: str) -> list[dict]:
+    """Deepgram Nova-3 with word timestamps."""
+    from .config import _get_key
+    api_key = _get_key("DEEPGRAM_API_KEY")
+    if not api_key:
+        return []
+    try:
+        import requests
+        log("Running Deepgram Nova-3 for word-level timestamps...")
+        with open(audio_path, "rb") as f:
+            audio_data = f.read()
+        r = requests.post(
+            f"https://api.deepgram.com/v1/listen?model=nova-3&language={lang[:2]}&punctuate=true",
+            headers={
+                "Authorization": f"Token {api_key}",
+                "Content-Type": "audio/mpeg",
+            },
+            data=audio_data,
+            timeout=120,
+        )
+        if not r.ok:
+            log(f"Deepgram failed: {r.status_code} {r.text[:200]}")
+            return []
+        data = r.json()
+        words = []
+        for alt in data.get("results", {}).get("channels", [{}])[0].get("alternatives", []):
+            for w in alt.get("words", []):
+                words.append({
+                    "word": w.get("punctuated_word", w["word"]),
+                    "start": w["start"],
+                    "end": w["end"],
+                })
+        log(f"Deepgram → {len(words)} word timestamps.")
+        return words
+    except Exception as e:
+        log(f"Deepgram error: {e}")
+        return []
 
 
 def _group_words(words: list[dict], group_size: int = 4) -> list[list[dict]]:
@@ -174,25 +328,9 @@ def generate_captions(audio_path: Path, work_dir: Path, lang: str = "en") -> dic
     result = {"words": words}
 
     if not words:
-        log("No word timestamps — skipping caption generation")
-        # Fallback: run whisper CLI for SRT only
-        try:
-            from .config import run_cmd
-            run_cmd([
-                "whisper", str(audio_path),
-                "--model", "base",
-                "--language", lang[:2],
-                "--output_format", "srt",
-                "--output_dir", str(work_dir),
-            ], capture=True)
-            candidates = list(work_dir.glob("*.srt"))
-            if candidates:
-                srt = candidates[0]
-                final = audio_path.with_suffix(".srt")
-                srt.rename(final)
-                result["srt_path"] = str(final)
-        except Exception as e:
-            log(f"Whisper CLI fallback failed: {e}")
+        log("No word timestamps — video will ship without burned-in captions.")
+        log("  Hint: Install 'pip install openai-whisper' OR set GROQ_API_KEY "
+            "(free tier) / OPENAI_API_KEY for cloud-based captions.")
         return result
 
     # Generate SRT

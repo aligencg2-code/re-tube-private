@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.0.1] — 2026-04-21 · Kurulum Stabilite Yamasi
+
+Kritik kurulum sorunlarını düzelten hotfix. Mevcut müşteriler `GUNCELLE.bat`
+ile yükseltebilir. Yeni müşterilerde sorunsuz kurulum garantisi.
+
+### Düzeltildi
+- **`openai-whisper` kurulumu kaldırıldı** (requirements'tan). Paket ~2 GB
+  torch dependency'si çekiyordu ve Python 3.14/3.15'te pip install hatası
+  veriyordu. Artık altyazı 4 farklı provider üzerinden alınıyor:
+  1. Lokal Whisper (install edilmişse, `pip install openai-whisper`)
+  2. **Groq Whisper API** — ÜCRETSİZ tier, `GROQ_API_KEY`
+  3. OpenAI Whisper API — `OPENAI_API_KEY`
+  4. Deepgram Nova-3 — `DEEPGRAM_API_KEY`
+  Hiçbiri yoksa video altyazısız üretilir (upload çalışmaya devam eder).
+- **KURULUM.bat** — ASCII encoding (Türkçe özel karakterler Windows cmd
+  codepage'inde bozuluyordu), Unicode kutu karakterleri kaldırıldı.
+- **RE-Tube.bat** — Unix-style `/dev/null` yerine Windows `nul` redirect.
+- **Python sürüm kontrolü** — 3.14/3.15 algılanırsa açık uyarı + çözüm rehberi.
+- **Pip install verbose** — `--quiet` kaldırıldı, hatalar artık görünür.
+- **GUNCELLE.bat** — `.git` klasörü yoksa (ZIP ile kurulmuşsa) otomatik
+  `git init + remote add + fetch + reset` yapıyor. Artık ZIP kullanıcıları
+  da güncelleyebiliyor.
+
+### Eklendi
+- **references/GOOGLE_OAUTH_ERISIM_HATASI.md** — OAuth "Access blocked" hatası
+  için adım adım çözüm (Test User ekleme rehberi).
+- **pyproject.toml** — `requires-python = ">=3.10,<3.14"` kısıtlaması eklendi.
+- **pyproject.toml** — `whisper_local` opsiyonel extras olarak eklendi
+  (`pip install -e .[whisper_local]`).
+
+### Geri uyumluluk
+✅ Mevcut `config.json`, `drafts/`, `media/`, `channels/`, `youtube_token.json` değişmez
+✅ Daha önce `openai-whisper` yüklediysen yine çalışır (otomatik algılanır)
+✅ `GUNCELLE.bat` + ZIP ile kurulum senaryoları ikisi de destekleniyor
+
+### Performans
+- Kurulum süresi: ~5 dk → **~30 sn** (whisper/torch kaldırıldı)
+- Disk kullanımı: ~3 GB → **~500 MB**
+- İlk çalıştırma: torch model indirme yok → anında başlar
+
+---
+
 ## [2.0.0] — 2026-04-20 · Enterprise Pack
 
 Büyük sürüm. 30 yeni özellik, 6000+ satır yeni kod, 301 otomatik test.

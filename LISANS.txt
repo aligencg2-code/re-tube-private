@@ -1,0 +1,125 @@
+═══════════════════════════════════════════════════════════════════
+                    RE-TUBE v2.0 — KULLANIM LİSANSI
+═══════════════════════════════════════════════════════════════════
+
+Yayın tarihi: 20 Nisan 2026
+Sürüm: 2.0.0 Enterprise Pack
+
+───────────────────────────────────────────────────────────────────
+1. LİSANSIN KAPSAMI
+───────────────────────────────────────────────────────────────────
+
+Bu lisansla RE-Tube programını:
+  ✓ Kendi bilgisayarında sınırsız süre kullanabilirsin
+  ✓ Kendi YouTube kanal(lar)ında sınırsız video üretebilirsin
+  ✓ Ajans planı satın aldıysan müşterilerin için kullanabilirsin
+  ✓ Tüm yeni sürümlerden (güncelleme) ücretsiz faydalanabilirsin
+
+───────────────────────────────────────────────────────────────────
+2. YASAK OLAN KULLANIMLAR
+───────────────────────────────────────────────────────────────────
+
+Aşağıdakileri yapmak kesinlikle YASAKTIR ve lisansı iptal sebebidir:
+
+  ✗ Programı başkasına satmak, kiralamak veya devretmek
+  ✗ Kaynak kodu public GitHub / internet'e koymak
+  ✗ Reverse engineering, kırma, crack işlemleri
+  ✗ Programın bir parçasını başka ürüne dahil etmek
+  ✗ Tek lisansı birden fazla bilgisayarda aynı anda kullanmak
+  ✗ Satın almadığın plan özelliklerini kırıp kullanmak
+
+───────────────────────────────────────────────────────────────────
+3. AI SAĞLAYICI ÜCRETLERİ
+───────────────────────────────────────────────────────────────────
+
+RE-Tube programı senin lisansına dahildir — aylık ek ücreti yoktur.
+Ancak kullandığın AI sağlayıcıları (Claude, Gemini, ElevenLabs, vb.)
+kendi fiyatlandırmasıyla çalışır. Bu ücretler senin API hesabından
+direkt olarak tahsil edilir; bizimle ilişkisi yoktur.
+
+Örnek maliyetler (Mart 2026):
+  • Claude Sonnet 4.6:  ~$0.004 / video
+  • Gemini Flash:       ~$0.001 / video
+  • ElevenLabs v2:      ~$0.12 / video (60sn)
+  • Pexels stok:        ÜCRETSİZ
+  • Edge TTS:           ÜCRETSİZ
+
+Ücretsiz başlangıç stack'i ile video başı ~$0.02'ye üretim yapabilirsin.
+
+───────────────────────────────────────────────────────────────────
+4. İÇERİK SORUMLULUĞU
+───────────────────────────────────────────────────────────────────
+
+RE-Tube'un ürettiği videoların tamamen senin sorumluluğundadır:
+
+  • Telif hakkı ihlali içerik üretmeme sorumluluğu sana aittir
+  • Yanıltıcı, dezenformasyon içeren içerikten biz sorumlu değiliz
+  • YouTube Topluluk Kuralları'na uyum senin sorumluluğundadır
+  • Sponsor/reklam açıklamalarını YASAL olarak yapman gerekir
+
+RE-Tube anti-halüsinasyon koruması ile AI'nın uydurma bilgi
+üretmesini MİNİMİZE eder ama %100 engellemez. Yayınlamadan
+önce kontrol etmen tavsiye edilir.
+
+───────────────────────────────────────────────────────────────────
+5. GARANTİ VE İADE
+───────────────────────────────────────────────────────────────────
+
+İade Politikası:
+  • İlk 7 gün içinde KOŞULSUZ İADE garantisi
+  • Kurulum tamamlandıktan sonra sadece kanıtlanmış teknik
+    problemlerde iade
+
+Garanti:
+  • Program "olduğu gibi" sunulur
+  • YouTube algoritma değişiklikleri garanti dışıdır
+  • 3rd party AI sağlayıcı kesintilerinden biz sorumlu değiliz
+  • Gelir tahminleri GARANTİ değildir, istatistiki referanstır
+
+───────────────────────────────────────────────────────────────────
+6. VERİ GİZLİLİĞİ
+───────────────────────────────────────────────────────────────────
+
+RE-Tube kendi bilgisayarında çalışır — cloud hizmeti değildir.
+
+  ✓ Verilerin bizim sunucumuzda saklanmaz
+  ✓ API key'lerin sadece senin diskinde (0600 izinle)
+  ✓ Ürettiğin içeriklere bizim erişimimiz yoktur
+  ✓ Kullanım analitiği toplanmaz (telemetry OPT-IN ve KAPALI)
+
+Sadece güncelleme kontrolü için GitHub'a anonim istek gider.
+Bu da KAPATILABİLİR (Ayarlar > auto_check = false).
+
+───────────────────────────────────────────────────────────────────
+7. SÜRÜM DESTEKLERİ
+───────────────────────────────────────────────────────────────────
+
+  • v2.x serisi: Sınırsız güncelleme desteği
+  • Kritik güvenlik yamaları: Ücretsiz
+  • Major upgrade (v3 gibi): Mevcut müşterilere %50 indirim
+  • Teknik destek: Forum + e-mail (iş saatleri)
+
+───────────────────────────────────────────────────────────────────
+8. AĞIRLAŞTIRICI DURUMLAR
+───────────────────────────────────────────────────────────────────
+
+Lisansın derhal iptal edilebileceği durumlar:
+  • Programı crack'leyip paylaşmak
+  • Telif ihlal eden içerik üretip RE-Tube'u suçlamak
+  • API key'leri paylaşarak başkalarına kullandırmak
+  • Sistemi YouTube spam'ine çevirmek
+
+───────────────────────────────────────────────────────────────────
+9. İLETİŞİM
+───────────────────────────────────────────────────────────────────
+
+Web:      https://retube.rewmarket.com
+Destek:   destek@retube.rewmarket.com
+Forum:    r10.net (Dijital Alışveriş)
+
+───────────────────────────────────────────────────────────────────
+
+Bu lisansı okuyup kabul ettiğini satın alma anında onayladın.
+Program kullanımı lisansın kabul edildiği anlamına gelir.
+
+Son güncelleme: 20.04.2026
