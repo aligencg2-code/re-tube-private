@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.0.2] — 2026-04-22 · Upload Bug Hotfix
+
+Üretim tamam, upload "draft yok" diyor şikayetinin acil yaması.
+
+### Düzeltildi
+- **🔴 KRİTİK:** Worker'ın `process_one()` fonksiyonu produce → upload geçişinde
+  stale local job dict kullanıyordu. `_run_produce` draft_path'i veritabanına
+  yazıyordu ama lokal değişkene yansıtmıyordu, dolayısıyla `_run_upload(job)`
+  çağrısı `draft_path=None` ile geçip "Upload icin draft yok" hatası veriyordu.
+  Mode="full" job'lar her seferinde produce sonrası upload aşamasında düşüyordu.
+  - Fix 1: `_run_produce` sonunda local `job["draft_path"]` da güncelleniyor
+  - Fix 2: `process_one` upload öncesi `qmod.load_job()` ile diskten reload
+  - Regression test: `tests/test_worker_upload_flow.py` (4 test)
+
+### Etki
+Bu bug v2.0.0'dan beri vardı. v2.0.0 ve v2.0.1'de "full" modda video üreten
+ama upload alamayan tüm müşteriler bu yamadan etkilenir. Üretilmiş ama
+yüklenmemiş videolar `~/.youtube-shorts-pipeline/media/` içinde duruyor —
+GUNCELLE.bat sonrası Kuyruk sayfasından "Tekrar Dene" ile upload yapılabilir.
+
+---
+
 ## [2.0.1] — 2026-04-21 · Kurulum Stabilite Yamasi
 
 Kritik kurulum sorunlarını düzelten hotfix. Mevcut müşteriler `GUNCELLE.bat`

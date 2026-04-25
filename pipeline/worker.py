@@ -135,6 +135,11 @@ def _run_produce(job: dict) -> bool:
             return False
         draft_path = str(candidates[0])
         qmod.update_job(job_id, draft_path=draft_path)
+        # Critical: also update the local job dict so process_one sees the new
+        # draft_path when it later calls _run_upload(job). Without this, the
+        # stale local copy still has draft_path=None and upload fails with
+        # "Upload icin draft yok".
+        job["draft_path"] = draft_path
 
     # 2) produce
     cmd = ["produce", "--draft", draft_path, "--lang", lang]
@@ -203,6 +208,12 @@ def process_one(job: dict) -> None:
         return
 
     # Upload stage (only for mode=full)
+    # Reload from disk to ensure draft_path (set during _run_produce) is picked
+    # up. Defensive — _run_produce already mutates the local dict, but in case
+    # of any future refactor this guarantees correctness.
+    fresh = qmod.load_job(job_id)
+    if fresh:
+        job = fresh
     qmod.update_job(job_id, status="uploading", stage="Yükleniyor", progress_pct=95)
     ok = _run_upload(job)
     if ok:
