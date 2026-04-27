@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.4] — 2026-04-22 · GUNCELLE.bat Flat Logic
+
+### Düzeltildi
+- **GUNCELLE.bat içiçe `if (...)` blokları kaldırıldı** — tüm akış flat
+  `goto :label` yapısına çevrildi. Windows cmd parser nested paren bloklarda
+  bazen "'n' is not recognized" gibi tuhaf hatalar üretiyordu (özellikle
+  ESCAPED parens `^(...^)` içeren echo satırlarıyla birleşince).
+- **`git reset --hard` çıktısı `>nul` ile susturuldu** — commit subject
+  içindeki tırnak karakterleri (`"origin yok"` gibi) parser'ı şaşırtmasın.
+- **Daha temiz hata akışı:** her hata kendi label'ına atlıyor (`:no_git`,
+  `:fetch_failed`, `:reset_failed`).
+
+### Etki
+v2.0.3 müşterilerinde "HEAD is now at... / 'n' is not recognized / Hard
+reset basarisiz!" tuhaf zinciri sona erdi. Aslında her şey çalışıyordu,
+sadece son ekran karışıktı. Bu sürümde temiz "GUNCELLEME TAMAMLANDI"
+mesajıyla kapanıyor.
+
+### Not
+v2.0.3 müşterilerinin makinesindeki dosyalar zaten güncellenmişti (HEAD
+satırı bunu gösteriyordu). Sadece script son satırlarda parser hatası
+veriyordu. RE-Tube.bat sorunsuz çalışıyordu.
+
+---
+
 ## [2.0.3] — 2026-04-22 · GUNCELLE.bat Self-Repair
 
 ### Düzeltildi
