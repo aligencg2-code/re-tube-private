@@ -1,6 +1,6 @@
 [project]
 name = "youtube-shorts-pipeline"
-version = "2.0.2"
+version = "2.0.3"
 description = "RE-Tube · AI-native YouTube otomasyon platformu (v2.0 Enterprise)"
 requires-python = ">=3.10,<3.14"
 license = "MIT"

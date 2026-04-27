@@ -22,8 +22,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: --- .git klasoru var mi? ---
+:: --- .git klasoru var mi VE saglikli mi? ---
 if exist ".git" (
+    :: Remote tanimli mi kontrol et - eski bozuk repo'ya karsi koruma
+    git remote get-url origin >nul 2>&1
+    if errorlevel 1 (
+        echo  [UYARI] .git klasoru var ama bozuk - remote tanimli degil.
+        echo          Otomatik onariliyor...
+        echo.
+        goto repair_repo
+    )
     echo  [OK] Git reposu bulundu, guncelleme cekiliyor...
     goto git_update
 )
@@ -35,6 +43,7 @@ echo  Mevcut dosyalar KORUNACAK, yeni sadece yeni dosyalari ekleyecek.
 echo.
 pause
 
+:repair_repo
 :: Git init + remote ekle + hard reset to main
 git init >nul 2>&1
 git remote remove origin >nul 2>&1
@@ -46,7 +55,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo  Son surum indiriliyor (bu birkaç dakika surebilir)...
+echo  Son surum indiriliyor (birkac dakika surebilir)...
 git fetch origin main --depth=1
 if %errorlevel% neq 0 (
     echo  [HATA] Indirme basarisiz!
@@ -77,19 +86,33 @@ git status --short
 echo.
 
 echo  Yeni surum indiriliyor...
-git pull origin main
+git pull origin main 2>nul
 if %errorlevel% neq 0 (
     echo.
-    echo  [HATA] Guncelleme basarisiz!
-    echo  Olasi sebep: Yerel degisiklikleriniz var.
+    echo  [UYARI] git pull basarisiz oldu.
+    echo          Repo bozuk olabilir, otomatik onarim deneniyor...
     echo.
-    echo  Cozum: git reset --hard origin/main
-    echo  ^(Uyari: Yerel degisiklikler SILINECEK^)
-    echo.
-    set /p FORCE="Hard reset yapilsin mi? (E/N): "
-    if /i "%FORCE%"=="E" (
-        git reset --hard origin/main
-    ) else (
+
+    :: Remote'u sifirla, fetch + reset
+    git remote remove origin >nul 2>&1
+    git remote add origin https://github.com/aligencg2-code/re-tube-private.git
+
+    git fetch origin main --depth=1
+    if errorlevel 1 (
+        echo.
+        echo  [HATA] Repo'ya erisilemiyor.
+        echo  Muhtemel sebepler:
+        echo    - Internet baglantisi yok
+        echo    - GitHub credentials gerekli
+        echo    - Repo erisim izni yok ^(yoneticiye yazin^)
+        pause
+        exit /b 1
+    )
+
+    echo  Dosyalar zorla guncelleniyor ^(yerel degisiklikler korunmuyor^)...
+    git reset --hard origin/main
+    if errorlevel 1 (
+        echo  [HATA] Hard reset basarisiz!
         pause
         exit /b 1
     )

@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.3] — 2026-04-22 · GUNCELLE.bat Self-Repair
+
+### Düzeltildi
+- **GUNCELLE.bat self-repair eklendi.** Eğer `.git` klasörü var ama remote
+  tanımlı değilse (önceki yarım kalan `git init` yüzünden), script
+  otomatik tespit edip `repair_repo` block'una atlar — remote'u sıfırdan ekler,
+  fetch yapar, hard reset atar. Müşterinin manuel müdahalesi gerekmez.
+- **`git pull` fail durumunda otomatik recovery.** Önceki sürümde "yerel
+  değişiklikler var" diye yanlış teşhis koyup hard reset onayı isteniyordu.
+  Şimdi otomatik remote add + fetch + reset yapıyor.
+- **ASCII safety:** GUNCELLE.bat'ten son kalan Türkçe `ç` karakteri (`birkaç`
+  → `birkac`) temizlendi. Tüm bat dosyaları artık saf ASCII.
+
+### Etki
+v2.0.2 müşterilerinden GUNCELLE.bat çalıştırmaya çalışıp "fatal: 'origin'
+does not appear to be a git repository" hatası alanlar bu sürümle düzelir.
+Yeni GUNCELLE.bat'i mevcut klasöre kopyalayıp tek tık çalıştırmak yeterli.
+
+---
+
 ## [2.0.2] — 2026-04-22 · Upload Bug Hotfix
 
 Üretim tamam, upload "draft yok" diyor şikayetinin acil yaması.
