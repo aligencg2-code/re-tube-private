@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.0.6] — 2026-05-19 · DALL-E 3 → GPT Image 1 otomatik geçiş
+
+Müşteri raporu (v2.0.5 sonrası): DALL-E 3 seçili olduğu halde hâlâ Pexels'e
+düşüyor. Log'da:
+```
+"param": "model", "code": "invalid_value"
+[broll] 6/6 frame(s) fell back to Pexels/solid-colour because 'DALL-E 3' could not produce them.
+```
+
+### Sebep
+OpenAI hesabının `dall-e-3` modeline erişimi yok (yeni hesaplarda
+varsayılan, ya da OpenAI bazı hesaplarda DALL-E 3'ü emekliye ayırıyor).
+API anahtarı geçerli, sadece **bu spesifik model** kullanılamıyor —
+ama **aynı anahtar `gpt-image-1` ile çalışıyor**.
+
+### Düzeltildi
+- **Otomatik fallback eklendi:** DALL-E 3 çağrısı `invalid_value`,
+  `model_not_found` veya "does not have access" hatası dönerse
+  dispatcher otomatik olarak `gpt-image-1`'i deniyor (aynı OpenAI
+  anahtarı, aynı endpoint, sadece farklı `model` parametresi).
+- **Yardımcı log:** `→ DALL-E 3 unavailable on this account; auto-retry
+  with GPT Image 1 (same OpenAI key)...` — müşteri ne olduğunu anlıyor.
+- `_generate_image_dalle` artık OpenAI'nin `error.code` ve `error.message`
+  alanlarını exception mesajına ekliyor; dispatcher bu kodlara bakıp
+  fallback'i tetikliyor.
+- `@with_retry` decorator'ı DALL-E 3'ten kaldırıldı — model "kalıcı
+  olarak yok" hatasında 3 kez yeniden denemek anlamsız.
+
+### Etki
+- "DALL-E 3" seçen müşteri artık otomatik gpt-image-1 alıyor (OpenAI
+  hesabında DALL-E 3 yoksa).
+- "GPT Image 1" zaten doğrudan çalışıyordu (v2.0.5 fix).
+- Diğer 21 sağlayıcı için bir değişiklik yok.
+
+### Müşteri için pratik tavsiye
+"DALL-E 3" seçenek listesinde dursa da yeni OpenAI hesaplarında
+çalışmıyor — UI'dan **GPT Image 1** seçmek (varsayılan olarak) daha
+güvenilir. Bu sürüm seçim hangisi olursa olsun OpenAI image'ı çalıştırıyor.
+
+---
+
 ## [2.0.5] — 2026-05-19 · Görsel sağlayıcı hotfix
 
 Müşteri raporu: **"OpenAI seçili olduğu halde Pexels üzerinden işlem yapıyor."**

@@ -70,9 +70,14 @@ def _generate_image_imagen4(prompt: str, output_path: Path, api_key: str,
     output_path.write_bytes(base64.b64decode(img_b64))
 
 
-@with_retry(max_retries=2, base_delay=2.0)
 def _generate_image_dalle(prompt: str, output_path: Path, api_key: str, hd: bool = False):
-    """Generate image via OpenAI DALL-E 3."""
+    """Generate image via OpenAI DALL-E 3.
+
+    Not decorated with @with_retry: when DALL-E 3 is unavailable
+    (invalid_value / model_not_found), the dispatcher needs to see
+    the original error so it can fall back to gpt-image-1. Retrying
+    the same failing model wastes the user's time.
+    """
     r = requests.post(
         "https://api.openai.com/v1/images/generations",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -86,7 +91,15 @@ def _generate_image_dalle(prompt: str, output_path: Path, api_key: str, hd: bool
         timeout=90,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"DALL-E {r.status_code}: {r.text[:200]}")
+        # Surface the OpenAI error code (e.g. 'invalid_value',
+        # 'model_not_found') so the dispatcher can auto-fallback.
+        try:
+            err = r.json().get("error", {})
+            code = err.get("code", "")
+            msg = err.get("message", r.text[:200])
+            raise RuntimeError(f"DALL-E {r.status_code} {code}: {msg}")
+        except ValueError:
+            raise RuntimeError(f"DALL-E {r.status_code}: {r.text[:200]}")
 
     img_url = r.json()["data"][0]["url"]
     img_data = requests.get(img_url, timeout=60).content
@@ -689,7 +702,28 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
                 frames.append(out_path)
                 success = True
             except Exception as e:
-                log(f"DALL-E failed for frame {i+1}: {e}")
+                log(f"DALL-E 3 failed for frame {i+1}: {e}")
+                # OpenAI accounts without DALL-E 3 access return
+                # "invalid_value" / "model_not_found" for the model param.
+                # Auto-fallback to gpt-image-1 with the SAME OpenAI key —
+                # the customer selected OpenAI, give them OpenAI.
+                err_str = str(e).lower()
+                if any(s in err_str for s in (
+                    "invalid_value", "model_not_found",
+                    "does not have access", "model not found",
+                )):
+                    try:
+                        log(f"  → DALL-E 3 unavailable on this account; "
+                            f"auto-retry with GPT Image 1 (same OpenAI key)...")
+                        _generate_image_gpt_image_1(
+                            prompt, out_path, openai_key,
+                            portrait=(height > width),
+                        )
+                        _resize_to_format(out_path, width, height)
+                        frames.append(out_path)
+                        success = True
+                    except Exception as e2:
+                        log(f"  GPT Image 1 fallback also failed: {e2}")
 
         # Provider: OpenAI GPT Image 1
         if not success and image_provider == "gpt_image_1" and openai_key:
