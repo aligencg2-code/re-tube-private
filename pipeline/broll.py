@@ -1,4 +1,7 @@
-"""B-roll generation — Veo video > Imagen 4 > Gemini Imagen > DALL-E 3 > Pexels stock > fallback."""
+"""B-roll generation — supports Veo, Imagen 4, Gemini Imagen, DALL-E 3, GPT Image 1,
+Stability SD3/SDXL, Flux (BFL + fal.ai), Ideogram, Recraft, Leonardo, Replicate,
+plus Pexels stock and a solid-colour fallback as last resort.
+"""
 
 import base64
 import re
@@ -88,6 +91,326 @@ def _generate_image_dalle(prompt: str, output_path: Path, api_key: str, hd: bool
     img_url = r.json()["data"][0]["url"]
     img_data = requests.get(img_url, timeout=60).content
     output_path.write_bytes(img_data)
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_gpt_image_1(prompt: str, output_path: Path, api_key: str,
+                                portrait: bool = True):
+    """Generate image via OpenAI GPT Image 1 (returns base64 directly)."""
+    size = "1024x1536" if portrait else "1024x1024"
+    r = requests.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": "gpt-image-1",
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+        },
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"GPT Image 1 {r.status_code}: {r.text[:200]}")
+
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("GPT Image 1: empty response")
+
+    entry = data[0]
+    if "b64_json" in entry and entry["b64_json"]:
+        output_path.write_bytes(base64.b64decode(entry["b64_json"]))
+    elif "url" in entry and entry["url"]:
+        img_data = requests.get(entry["url"], timeout=60).content
+        output_path.write_bytes(img_data)
+    else:
+        raise RuntimeError("GPT Image 1: no image data in response")
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_stability_sd3(prompt: str, output_path: Path, api_key: str,
+                                  model: str = "sd3-large", aspect: str = "9:16"):
+    """Generate image via Stability AI Stable Diffusion 3 v2beta API."""
+    r = requests.post(
+        "https://api.stability.ai/v2beta/stable-image/generate/sd3",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "image/*",
+        },
+        files={"none": ""},
+        data={
+            "prompt": prompt,
+            "model": model,
+            "aspect_ratio": aspect,
+            "output_format": "png",
+        },
+        timeout=120,
+    )
+    if r.status_code != 200:
+        detail = r.text[:200] if r.text else "no body"
+        raise RuntimeError(f"Stability SD3 {r.status_code}: {detail}")
+    output_path.write_bytes(r.content)
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_stability_sdxl(prompt: str, output_path: Path, api_key: str,
+                                   width: int = 832, height: int = 1216):
+    """Generate image via Stability AI SDXL v1 API."""
+    r = requests.post(
+        "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        json={
+            "text_prompts": [{"text": prompt, "weight": 1.0}],
+            "cfg_scale": 7,
+            "height": height,
+            "width": width,
+            "samples": 1,
+            "steps": 30,
+        },
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Stability SDXL {r.status_code}: {r.text[:200]}")
+    artifacts = r.json().get("artifacts", [])
+    if not artifacts:
+        raise RuntimeError("Stability SDXL: empty response")
+    output_path.write_bytes(base64.b64decode(artifacts[0]["base64"]))
+
+
+def _generate_image_flux_bfl(prompt: str, output_path: Path, api_key: str,
+                             model: str = "flux-pro-1.1",
+                             width: int = 768, height: int = 1344):
+    """Generate image via Black Forest Labs Flux API (async: submit → poll → download)."""
+    # Map provider key → BFL endpoint slug
+    endpoint = "flux-pro-1.1-ultra" if model.endswith("ultra") else "flux-pro-1.1"
+    submit = requests.post(
+        f"https://api.bfl.ml/v1/{endpoint}",
+        headers={
+            "x-key": api_key,
+            "Content-Type": "application/json",
+            "accept": "application/json",
+        },
+        json={
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "safety_tolerance": 2,
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    if submit.status_code not in (200, 201):
+        raise RuntimeError(f"Flux BFL submit {submit.status_code}: {submit.text[:200]}")
+    task_id = submit.json().get("id")
+    if not task_id:
+        raise RuntimeError("Flux BFL: no task id returned")
+
+    for _ in range(40):  # 40 * 3s = 120s max
+        time.sleep(3)
+        poll = requests.get(
+            "https://api.bfl.ml/v1/get_result",
+            headers={"x-key": api_key, "accept": "application/json"},
+            params={"id": task_id},
+            timeout=15,
+        )
+        if poll.status_code != 200:
+            continue
+        body = poll.json()
+        status = body.get("status", "")
+        if status == "Ready":
+            sample_url = body.get("result", {}).get("sample")
+            if not sample_url:
+                raise RuntimeError("Flux BFL: ready but no sample URL")
+            img = requests.get(sample_url, timeout=60)
+            if img.status_code != 200:
+                raise RuntimeError(f"Flux BFL download {img.status_code}")
+            output_path.write_bytes(img.content)
+            return
+        if status in ("Error", "Request Moderated", "Content Moderated"):
+            raise RuntimeError(f"Flux BFL: {status}")
+    raise RuntimeError("Flux BFL: timeout after 120s")
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_flux_fal(prompt: str, output_path: Path, api_key: str,
+                             model: str = "flux/dev"):
+    """Generate image via fal.ai Flux (sync via fal.run)."""
+    slug = "fal-ai/flux/schnell" if model.endswith("schnell") else "fal-ai/flux/dev"
+    r = requests.post(
+        f"https://fal.run/{slug}",
+        headers={
+            "Authorization": f"Key {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "prompt": prompt,
+            "image_size": "portrait_16_9",
+            "num_images": 1,
+            "enable_safety_checker": True,
+        },
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Flux fal.ai {r.status_code}: {r.text[:200]}")
+    images = r.json().get("images", [])
+    if not images:
+        raise RuntimeError("Flux fal.ai: empty response")
+    img_url = images[0].get("url")
+    if not img_url:
+        raise RuntimeError("Flux fal.ai: no image URL")
+    img = requests.get(img_url, timeout=60)
+    if img.status_code != 200:
+        raise RuntimeError(f"Flux fal.ai download {img.status_code}")
+    output_path.write_bytes(img.content)
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_ideogram(prompt: str, output_path: Path, api_key: str,
+                             turbo: bool = False, aspect: str = "ASPECT_9_16"):
+    """Generate image via Ideogram V2."""
+    r = requests.post(
+        "https://api.ideogram.ai/generate",
+        headers={"Api-Key": api_key, "Content-Type": "application/json"},
+        json={
+            "image_request": {
+                "prompt": prompt,
+                "model": "V_2_TURBO" if turbo else "V_2",
+                "aspect_ratio": aspect,
+                "magic_prompt_option": "AUTO",
+            }
+        },
+        timeout=90,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Ideogram {r.status_code}: {r.text[:200]}")
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("Ideogram: empty response")
+    img_url = data[0].get("url")
+    if not img_url:
+        raise RuntimeError("Ideogram: no image URL")
+    img = requests.get(img_url, timeout=60)
+    if img.status_code != 200:
+        raise RuntimeError(f"Ideogram download {img.status_code}")
+    output_path.write_bytes(img.content)
+
+
+@with_retry(max_retries=2, base_delay=2.0)
+def _generate_image_recraft(prompt: str, output_path: Path, api_key: str,
+                            size: str = "1024x1820"):
+    """Generate image via Recraft V3 (OpenAI-style API)."""
+    r = requests.post(
+        "https://external.api.recraft.ai/v1/images/generations",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"prompt": prompt, "model": "recraftv3", "size": size, "n": 1},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Recraft {r.status_code}: {r.text[:200]}")
+    data = r.json().get("data", [])
+    if not data:
+        raise RuntimeError("Recraft: empty response")
+    img_url = data[0].get("url")
+    if not img_url:
+        raise RuntimeError("Recraft: no image URL")
+    img = requests.get(img_url, timeout=60)
+    if img.status_code != 200:
+        raise RuntimeError(f"Recraft download {img.status_code}")
+    output_path.write_bytes(img.content)
+
+
+def _generate_image_leonardo(prompt: str, output_path: Path, api_key: str,
+                             model_id: str = "6b645e3a-d64f-4341-a6d8-7a3690fbf042",
+                             width: int = 832, height: int = 1472):
+    """Generate image via Leonardo Phoenix (async: submit → poll → download)."""
+    submit = requests.post(
+        "https://cloud.leonardo.ai/api/rest/v1/generations",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        json={
+            "prompt": prompt,
+            "modelId": model_id,
+            "width": width,
+            "height": height,
+            "num_images": 1,
+            "alchemy": False,
+        },
+        timeout=30,
+    )
+    if submit.status_code not in (200, 201):
+        raise RuntimeError(f"Leonardo submit {submit.status_code}: {submit.text[:200]}")
+    gen_id = submit.json().get("sdGenerationJob", {}).get("generationId")
+    if not gen_id:
+        raise RuntimeError("Leonardo: no generation id")
+
+    for _ in range(40):  # 40 * 3s = 120s max
+        time.sleep(3)
+        poll = requests.get(
+            f"https://cloud.leonardo.ai/api/rest/v1/generations/{gen_id}",
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            timeout=15,
+        )
+        if poll.status_code != 200:
+            continue
+        gen = poll.json().get("generations_by_pk", {})
+        if gen.get("status") == "COMPLETE":
+            imgs = gen.get("generated_images", [])
+            if not imgs:
+                raise RuntimeError("Leonardo: complete but no images")
+            img_url = imgs[0].get("url")
+            if not img_url:
+                raise RuntimeError("Leonardo: no image URL")
+            img = requests.get(img_url, timeout=60)
+            if img.status_code != 200:
+                raise RuntimeError(f"Leonardo download {img.status_code}")
+            output_path.write_bytes(img.content)
+            return
+        if gen.get("status") == "FAILED":
+            raise RuntimeError("Leonardo: generation failed")
+    raise RuntimeError("Leonardo: timeout after 120s")
+
+
+def _generate_image_replicate(prompt: str, output_path: Path, api_key: str,
+                              model: str = "black-forest-labs/flux-schnell"):
+    """Generate image via Replicate (sync via Prefer: wait header)."""
+    r = requests.post(
+        f"https://api.replicate.com/v1/models/{model}/predictions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Prefer": "wait=120",
+        },
+        json={
+            "input": {
+                "prompt": prompt,
+                "aspect_ratio": "9:16",
+                "output_format": "png",
+                "num_outputs": 1,
+            }
+        },
+        timeout=180,
+    )
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"Replicate {r.status_code}: {r.text[:200]}")
+    body = r.json()
+    output = body.get("output")
+    # Output can be a string URL or a list of URLs
+    if isinstance(output, list):
+        img_url = output[0] if output else None
+    else:
+        img_url = output
+    if not img_url:
+        raise RuntimeError("Replicate: no output URL")
+    img = requests.get(img_url, timeout=60)
+    if img.status_code != 200:
+        raise RuntimeError(f"Replicate download {img.status_code}")
+    output_path.write_bytes(img.content)
 
 
 def _generate_video_veo(prompt: str, output_path: Path, api_key: str,
@@ -243,15 +566,27 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
                    width: int = 1080, height: int = 1920) -> list[Path]:
     """Generate b-roll based on config provider selection.
 
-    Providers:
-    - veo_*: Generate AI video clips via Google Veo (returns .mp4 files)
-    - imagen4 / imagen4_fast / imagen4_ultra: Imagen 4 AI images
+    Supported providers:
+    - veo_*: Google Veo AI video clips (returns .mp4 files)
+    - imagen4 / imagen4_fast / imagen4_ultra: Google Imagen 4
     - gemini_imagen / gemini_flash_img: Gemini native image generation
-    - dalle3 / dalle3_hd: OpenAI DALL-E 3 images
-    - pexels: Stock photos from Pexels (returns .png files)
+    - dalle3 / dalle3_hd: OpenAI DALL-E 3
+    - gpt_image_1: OpenAI GPT Image 1
+    - sd3_large / sd3_medium / sdxl: Stability AI
+    - flux_pro / flux_pro_ultra: Black Forest Labs Flux (BFL API)
+    - flux_dev / flux_schnell: Flux via fal.ai
+    - ideogram_v2 / ideogram_turbo: Ideogram
+    - recraft_v3: Recraft V3
+    - leonardo_phoenix: Leonardo Phoenix
+    - replicate: Replicate (defaults to Flux Schnell)
+    - pexels / pixabay / unsplash: stock photos
 
-    When veo is selected, returns .mp4 files directly — assemble.py
-    should handle both image and video inputs.
+    If the selected provider's API key is missing or the call fails, we
+    log a clear warning and fall back to Pexels (if its key is set), and
+    finally to a solid-colour frame so the pipeline never aborts.
+
+    When veo_* is selected, returns .mp4 files — assemble.py handles
+    both image and video inputs.
     """
     from .config import load_config, PROVIDERS
 
@@ -259,12 +594,49 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
     image_provider = config.get("providers", {}).get("image", "pexels")
     provider_info = PROVIDERS.get("image", {}).get(image_provider, {})
     model = provider_info.get("model")
+    provider_name = provider_info.get("name", image_provider)
+    needs_key = provider_info.get("needs_key")
 
+    # Resolve every API key once up front
     gemini_key = get_gemini_key()
     openai_key = _get_key("OPENAI_API_KEY")
     pexels_key = _get_key("PEXELS_API_KEY")
+    stability_key = _get_key("STABILITY_API_KEY")
+    bfl_key = _get_key("BFL_API_KEY")
+    fal_key = _get_key("FAL_API_KEY")
+    ideogram_key = _get_key("IDEOGRAM_API_KEY")
+    recraft_key = _get_key("RECRAFT_API_KEY")
+    leonardo_key = _get_key("LEONARDO_API_KEY")
+    replicate_key = _get_key("REPLICATE_API_KEY")
+
+    # Up-front warning: paid provider selected but its key is missing.
+    # This avoids the "OpenAI is selected but it uses Pexels" surprise.
+    key_lookup = {
+        "OPENAI_API_KEY": openai_key,
+        "GEMINI_API_KEY": gemini_key,
+        "STABILITY_API_KEY": stability_key,
+        "BFL_API_KEY": bfl_key,
+        "FAL_API_KEY": fal_key,
+        "IDEOGRAM_API_KEY": ideogram_key,
+        "RECRAFT_API_KEY": recraft_key,
+        "LEONARDO_API_KEY": leonardo_key,
+        "REPLICATE_API_KEY": replicate_key,
+        "PEXELS_API_KEY": pexels_key,
+        "PIXABAY_API_KEY": _get_key("PIXABAY_API_KEY"),
+        "UNSPLASH_API_KEY": _get_key("UNSPLASH_API_KEY"),
+    }
+    if needs_key and not key_lookup.get(needs_key):
+        log(
+            f"[broll] WARNING: selected provider '{provider_name}' "
+            f"({image_provider}) needs {needs_key} but it is not set. "
+            "Falling back to Pexels/solid-colour. Add the key in Settings → API Keys."
+        )
+
     orientation = "portrait" if height > width else "landscape"
     frames = []
+    # Track how many frames the SELECTED paid provider actually produced
+    # (so cost.py doesn't bill the user for Pexels fallbacks).
+    paid_provider_frames = 0
 
     for i, prompt in enumerate(prompts):
         success = False
@@ -274,7 +646,7 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
             out_path = out_dir / f"broll_{i}.mp4"
             try:
                 veo_model = model or "veo-2.0-generate-001"
-                log(f"Generating b-roll video {i+1}/{len(prompts)} via {provider_info.get('name', 'Veo')}...")
+                log(f"Generating b-roll video {i+1}/{len(prompts)} via {provider_name}...")
                 _generate_video_veo(prompt, out_path, gemini_key, duration=5, aspect=aspect, model=veo_model)
                 frames.append(out_path)
                 success = True
@@ -286,7 +658,7 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
             out_path = out_dir / f"broll_{i}.png"
             try:
                 imagen_model = model or "imagen-4.0-generate-001"
-                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'Imagen 4')}...")
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
                 _generate_image_imagen4(prompt, out_path, gemini_key, model=imagen_model)
                 _resize_to_format(out_path, width, height)
                 frames.append(out_path)
@@ -298,7 +670,7 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
         if not success and image_provider.startswith("gemini") and gemini_key:
             out_path = out_dir / f"broll_{i}.png"
             try:
-                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'Gemini Imagen')}...")
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
                 _generate_image_gemini(prompt, out_path, gemini_key)
                 _resize_to_format(out_path, width, height)
                 frames.append(out_path)
@@ -311,13 +683,139 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
             out_path = out_dir / f"broll_{i}.png"
             try:
                 hd = image_provider == "dalle3_hd"
-                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_info.get('name', 'DALL-E 3')}...")
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
                 _generate_image_dalle(prompt, out_path, openai_key, hd=hd)
                 _resize_to_format(out_path, width, height)
                 frames.append(out_path)
                 success = True
             except Exception as e:
                 log(f"DALL-E failed for frame {i+1}: {e}")
+
+        # Provider: OpenAI GPT Image 1
+        if not success and image_provider == "gpt_image_1" and openai_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_gpt_image_1(prompt, out_path, openai_key,
+                                            portrait=(height > width))
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"GPT Image 1 failed for frame {i+1}: {e}")
+
+        # Provider: Stability AI SD3 family
+        if not success and image_provider in ("sd3_large", "sd3_medium") and stability_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                sd_model = "sd3-large" if image_provider == "sd3_large" else "sd3-medium"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_stability_sd3(prompt, out_path, stability_key,
+                                              model=sd_model, aspect=aspect)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Stability SD3 failed for frame {i+1}: {e}")
+
+        # Provider: Stability SDXL
+        if not success and image_provider == "sdxl" and stability_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                # SDXL only accepts dimensions in 64px steps; portrait 832x1216.
+                _generate_image_stability_sdxl(prompt, out_path, stability_key,
+                                               width=832, height=1216)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Stability SDXL failed for frame {i+1}: {e}")
+
+        # Provider: Flux (Black Forest Labs)
+        if not success and image_provider in ("flux_pro", "flux_pro_ultra") and bfl_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                bfl_model = "flux-pro-1.1-ultra" if image_provider == "flux_pro_ultra" else "flux-pro-1.1"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_flux_bfl(prompt, out_path, bfl_key, model=bfl_model)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Flux BFL failed for frame {i+1}: {e}")
+
+        # Provider: Flux (fal.ai dev/schnell)
+        if not success and image_provider in ("flux_dev", "flux_schnell") and fal_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                fal_model = "flux/schnell" if image_provider == "flux_schnell" else "flux/dev"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_flux_fal(prompt, out_path, fal_key, model=fal_model)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Flux fal.ai failed for frame {i+1}: {e}")
+
+        # Provider: Ideogram
+        if not success and image_provider in ("ideogram_v2", "ideogram_turbo") and ideogram_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                aspect_tag = "ASPECT_9_16" if height > width else "ASPECT_16_9"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_ideogram(
+                    prompt, out_path, ideogram_key,
+                    turbo=(image_provider == "ideogram_turbo"),
+                    aspect=aspect_tag,
+                )
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Ideogram failed for frame {i+1}: {e}")
+
+        # Provider: Recraft V3
+        if not success and image_provider == "recraft_v3" and recraft_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                size = "1024x1820" if height > width else "1820x1024"
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_recraft(prompt, out_path, recraft_key, size=size)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Recraft failed for frame {i+1}: {e}")
+
+        # Provider: Leonardo Phoenix
+        if not success and image_provider == "leonardo_phoenix" and leonardo_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_leonardo(prompt, out_path, leonardo_key)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Leonardo failed for frame {i+1}: {e}")
+
+        # Provider: Replicate gateway
+        if not success and image_provider == "replicate" and replicate_key:
+            out_path = out_dir / f"broll_{i}.png"
+            try:
+                log(f"Generating b-roll image {i+1}/{len(prompts)} via {provider_name}...")
+                _generate_image_replicate(prompt, out_path, replicate_key)
+                _resize_to_format(out_path, width, height)
+                frames.append(out_path)
+                success = True
+            except Exception as e:
+                log(f"Replicate failed for frame {i+1}: {e}")
+
+        # Anything that succeeded above came from the selected paid/free provider.
+        # Track it so we only charge for frames the selected provider actually made.
+        if success:
+            paid_provider_frames += 1
 
         # Provider: Pexels (stock photos — default or fallback)
         if not success and pexels_key:
@@ -347,20 +845,34 @@ def generate_broll(prompts: list, out_dir: Path, aspect: str = "9:16",
             log(f"Frame {i+1}: using color fallback")
             frames.append(_fallback_frame(i, out_dir, width, height))
 
-    # Cost tracking — one record per successful paid frame set
+    # Cost tracking — only bill the user for frames the selected paid
+    # provider actually produced. Pexels fallbacks and solid-colour
+    # fallbacks must NOT be billed as if the paid provider ran.
     try:
         from . import cost as _cost
-        # cost_60s in PROVIDERS catalog is "per 60s of final video" — treat
-        # generated frames as the unit-of-video, not absolute seconds.
-        paid_count = len([f for f in frames if f and f.exists() and f.stat().st_size > 1000])
-        if image_provider not in ("pexels", "pixabay", "unsplash") and paid_count > 0:
-            # Assume ~10s of video per frame on average (Ken Burns)
-            video_seconds = paid_count * 10
+        is_stock = image_provider in ("pexels", "pixabay", "unsplash")
+        if not is_stock and paid_provider_frames > 0:
+            # cost_60s in PROVIDERS catalog is "per 60s of final video" —
+            # assume ~10s of video per Ken-Burns frame.
+            video_seconds = paid_provider_frames * 10
             _cost.record_estimated(
                 job_id=None, stage="broll",
                 category=("video" if image_provider.startswith("veo") else "image"),
                 provider_key=image_provider, seconds=video_seconds, model=model,
-                extra={"frames": paid_count, "aspect": aspect},
+                extra={
+                    "frames": paid_provider_frames,
+                    "total_requested": len(prompts),
+                    "aspect": aspect,
+                },
+            )
+        if not is_stock and paid_provider_frames < len(prompts):
+            # Surface partial-fallback so the customer knows why some
+            # frames look like stock photos.
+            fallback_count = len(prompts) - paid_provider_frames
+            log(
+                f"[broll] {fallback_count}/{len(prompts)} frame(s) fell back to "
+                f"Pexels/solid-colour because '{provider_name}' could not produce them. "
+                "Check API key, quota, or content policy."
             )
     except Exception:
         pass

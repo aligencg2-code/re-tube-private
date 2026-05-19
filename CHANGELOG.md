@@ -1,5 +1,83 @@
 # Changelog
 
+## [2.0.5] — 2026-05-19 · Görsel sağlayıcı hotfix
+
+Müşteri raporu: **"OpenAI seçili olduğu halde Pexels üzerinden işlem yapıyor."**
+
+### Sorun
+`pipeline/broll.py`'daki dispatcher sadece şu prefix'leri yakalıyordu:
+`veo`, `imagen4`, `gemini`, `dalle`. Catalog'taki 23 görsel sağlayıcının
+**10 tanesi** (GPT Image 1, SD3 Large/Medium, SDXL, Flux Pro/Ultra/Dev/Schnell,
+Ideogram V2/Turbo, Recraft V3, Leonardo Phoenix, Replicate) hiçbir branch'e
+düşmüyor, sessizce Pexels stok foto'ya geçiyordu. UI'da "OpenAI GPT Image 1"
+seçen müşteri stok fotoğraf alıyordu — ama cost.py paid provider gibi
+fatura kaydı tutuyordu (çift hata).
+
+### Düzeltildi
+- **GPT Image 1 (OpenAI)** — `_generate_image_gpt_image_1()` eklendi,
+  `model=gpt-image-1` ile `images/generations` endpoint'i; `b64_json`
+  ve `url` cevap formatlarının ikisini de destekliyor.
+- **Stability SD3 Large / SD3 Medium** — `api.stability.ai/v2beta`
+  endpoint'i, 9:16 aspect ratio.
+- **Stability SDXL** — `v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image`,
+  832x1216 portrait, base64 decode.
+- **Flux Pro / Flux Pro Ultra (BFL)** — `api.bfl.ml/v1/flux-pro-1.1`
+  async submit-poll-download (40 deneme × 3s = 120s timeout).
+- **Flux Dev / Flux Schnell (fal.ai)** — `fal.run/fal-ai/flux/{dev,schnell}`
+  sync endpoint'i, portrait 16:9.
+- **Ideogram V2 / V2 Turbo** — `api.ideogram.ai/generate`, ASPECT_9_16,
+  Magic Prompt AUTO.
+- **Recraft V3** — `external.api.recraft.ai/v1/images/generations`
+  (OpenAI uyumlu format), 1024x1820.
+- **Leonardo Phoenix** — `cloud.leonardo.ai` async generation polling,
+  Phoenix model ID `6b645e3a-d64f-4341-a6d8-7a3690fbf042`.
+- **Replicate** — `api.replicate.com/v1/models/.../predictions` sync
+  `Prefer: wait=120` modu, varsayılan Flux Schnell modeli.
+
+### Düzeltildi (faturalama)
+- **`paid_provider_frames` sayacı eklendi** — `cost.py` artık sadece
+  seçili paid provider'ın gerçekten ürettiği frame'leri sayıyor. Pexels'e
+  düşen frame'ler ve solid-colour fallback'ler paid provider faturasına
+  yansımıyor.
+- Önceden: 6 frame istendi, 6 frame Pexels'ten geldi → OpenAI gibi
+  faturalandı. Sonra: 6 frame Pexels'ten geldi → 0$ kaydedildi.
+
+### Geliştirildi (kullanıcı deneyimi)
+- **Eksik API anahtarı uyarısı** — Seçili paid sağlayıcının anahtarı
+  yoksa job başında log'a `[broll] WARNING: selected provider 'X' needs
+  Y_API_KEY but it is not set. Falling back to Pexels...` mesajı düşüyor.
+  Müşteri neden stok foto aldığını anında görüyor.
+- **Kısmi fallback raporu** — Job sonunda, N frame istendi M tanesi
+  paid provider'dan geldiyse `[broll] X/N frame(s) fell back to Pexels...`
+  log'u; içerik politikası ihlali veya kota tükenmesi durumlarını ortaya
+  çıkarıyor.
+- `pipeline/broll.py` docstring'i artık 23 görsel sağlayıcının tamamını
+  listeliyor.
+
+### Etki
+- **Önceden:** 23 görsel sağlayıcının 13'ü çalışıyordu (Veo, Imagen 4
+  ailesi, Gemini ailesi, DALL-E 3 + HD, Pexels/Pixabay/Unsplash stok).
+  Geri kalan 10'u UI'da seçilebiliyordu ama hep Pexels üretiyordu.
+- **Sonrasında:** 23/23 sağlayıcı explicit dispatch ediliyor. UI'da
+  seçilen sağlayıcı gerçekten kullanılıyor.
+
+### Test
+- Static dispatch analizi: 23/23 image provider explicit handle ediliyor.
+- `pipeline/broll.py` Python syntax check ✓
+- 12 image generator fonksiyonu mevcut: `_generate_image_{dalle, flux_bfl,
+  flux_fal, gemini, gpt_image_1, ideogram, imagen4, leonardo, recraft,
+  replicate, stability_sd3, stability_sdxl}`.
+
+### Migration / Müşteri etkisi
+- Backward compatible: mevcut config.json'lar değişmiyor.
+- Mevcut müşteri `pexels` seçili kalmaya devam ederse hiçbir şey
+  değişmiyor — dispatcher yine Pexels'i çağırıyor.
+- Ücretli sağlayıcı seçen müşterilerin doğru API anahtarını eklemesi
+  yeterli (`Ayarlar → API Keys`). Eksik anahtar varsa artık log'da
+  net uyarı görüyorlar.
+
+---
+
 ## [2.0.4] — 2026-04-22 · GUNCELLE.bat Flat Logic
 
 ### Düzeltildi
